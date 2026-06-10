@@ -1,0 +1,80 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: ai-interview-platform
+
+  # 启用虚拟线程
+  threads:
+    virtual:
+      enabled: true
+  
+  # 数据库配置
+  datasource:
+    url: jdbc:postgresql://localhost:5432/interview_db
+    username: postgres
+    password: ${POSTGRES_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+  
+  # JPA配置
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  
+  # # OpenAI Configuration
+  # ai:
+  #   openai:
+  #     api-key: sk-c31838b0eed74d1d9279fbecd5dc1f5e
+  #     base-url: https://dashscope.aliyuncs.com/compatible-mode
+  #     chat:
+  #       options:
+  #         model: qwen-turbo
+
+  # Spring AI配置
+  ai:
+    openai:
+      base-url: ${AI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      api-key: ${AI_API_KEY}
+      chat:
+        options:
+          model: ${AI_MODEL:qwen3.5-flash}
+      embedding:
+        options:
+          model: text-embedding-v3
+          dimensions: 1024
+  
+  # Redis 配置
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      timeout: 3000ms
+      connect-timeout: 3000ms
+
+  # 排除 Redisson 自动配置（使用 Spring Data Redis / Lettuce）
+  autoconfigure:
+    exclude:
+      - org.redisson.spring.starter.RedissonAutoConfigurationV4
+
+  # pgvector配置
+  vectorstore:
+    pgvector:
+      index-type: HNSW
+      distance-type: COSINE_DISTANCE
+      dimensions: 1024
+      initialize-schema: true
+
+# 自定义配置
+app:
+  cors:
+    allowed-origins: http://localhost:5173
+  storage:
+    endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
+    access-key: ${STORAGE_ACCESS_KEY:minioadmin}
+    secret-key: ${STORAGE_SECRET_KEY:minioadmin}
+    bucket: interview-guide

@@ -1,0 +1,6 @@
+{
+  "name": "Cognitive Talent System",
+  "description": "基于 Glassmorphism 微光质感与双端响应式的智能AI招聘全流程闭环系统（包含简历智能解析、人才库匹配、AI生成面试提纲、全互动式模拟面试以及量化雷达图测评）。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

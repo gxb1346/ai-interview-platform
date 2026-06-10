@@ -1,0 +1,77 @@
+[versions]
+# Spring Boot 4.0
+spring-boot = "4.0.1"
+dependency-management = "1.1.7"
+
+# Spring AI 2.0
+spring-ai = "2.0.0-M4"
+
+# Spring AI Agent Utils 0.7.0 (独立版本，非 Spring AI BOM 管理)
+spring-ai-agent-utils = "0.7.0"
+
+# AWS SDK
+aws-sdk = "2.29.51"
+
+# Redisson
+redisson = "4.0.0"
+
+# iText 8
+itext = "8.0.5"
+
+# Apache Tika
+tika = "2.9.2"
+
+# MapStruct
+mapstruct = "1.6.3"
+
+# SpringDoc OpenAPI
+springdoc = "3.0.2"
+
+# Lombok
+lombok = "1.18.36"
+
+# Pinyin4j
+pinyin4j = "2.5.1"
+
+# JUnit
+junit = "5.10.3"
+
+[plugins]
+spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }
+spring-dependency-management = { id = "io.spring.dependency-management", version.ref = "dependency-management" }
+
+[libraries]
+# Spring AI
+spring-ai-openai = { module = "org.springframework.ai:spring-ai-starter-model-openai", version.ref = "spring-ai" }
+spring-ai-pgvector = { module = "org.springframework.ai:spring-ai-starter-vector-store-pgvector", version.ref = "spring-ai" }
+spring-ai-agent-utils = { module = "org.springaicommunity:spring-ai-agent-utils", version.ref = "spring-ai-agent-utils" }
+
+# Apache Tika
+tika-core = { module = "org.apache.tika:tika-core", version.ref = "tika" }
+tika-parsers = { module = "org.apache.tika:tika-parsers-standard-package", version.ref = "tika" }
+
+# AWS SDK
+aws-s3 = { module = "software.amazon.awssdk:s3", version.ref = "aws-sdk" }
+
+# Redisson
+redisson-starter = { module = "org.redisson:redisson-spring-boot-starter", version.ref = "redisson" }
+
+# iText 8
+itext-core = { module = "com.itextpdf:itext-core", version.ref = "itext" }
+itext-font-asian = { module = "com.itextpdf:font-asian", version.ref = "itext" }
+
+# Pinyin4j
+pinyin4j = { module = "com.belerweb:pinyin4j", version.ref = "pinyin4j" }
+
+# SpringDoc OpenAPI
+springdoc = { module = "org.springdoc:springdoc-openapi-starter-webmvc-ui", version.ref = "springdoc" }
+
+# Lombok
+lombok = { module = "org.projectlombok:lombok", version.ref = "lombok" }
+
+# MapStruct
+mapstruct = { module = "org.mapstruct:mapstruct", version.ref = "mapstruct" }
+mapstruct-processor = { module = "org.mapstruct:mapstruct-processor", version.ref = "mapstruct" }
+
+# JUnit
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
