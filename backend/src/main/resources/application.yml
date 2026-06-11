@@ -38,7 +38,7 @@ spring:
   # Spring AI配置
   ai:
     openai:
-      base-url: ${AI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      base-url: ${AI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
       api-key: ${AI_API_KEY}
       chat:
         options:
@@ -72,7 +72,7 @@ spring:
 # 自定义配置
 app:
   cors:
-    allowed-origins: http://localhost:5173
+    allowed-origins: http://localhost:3000,http://localhost:5173
   storage:
     endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
     access-key: ${STORAGE_ACCESS_KEY:minioadmin}

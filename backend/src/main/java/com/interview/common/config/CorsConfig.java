@@ -16,7 +16,10 @@ public class CorsConfig {
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
-        config.addAllowedOrigin(allowedOrigins);
+        // 支持逗号分隔的多个 origin
+        for (String origin : allowedOrigins.split(",")) {
+            config.addAllowedOrigin(origin.trim());
+        }
         config.addAllowedMethod("*");
         config.addAllowedHeader("*");
         config.setAllowCredentials(true);
