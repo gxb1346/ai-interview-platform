@@ -49,7 +49,7 @@ export default function InterviewRecordsView({ scoreCards }: InterviewRecordsVie
       </div>
 
       {/* Filter and Search controls */}
-      <div className="bg-white/70 backdrop-blur-md p-4 rounded-xl border border-white/40 shadow-sm flex flex-col md:flex-row items-center gap-4 justify-between">
+      <div className="bg-white/70 backdrop-blur-md p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center gap-4 justify-between">
         <div className="relative w-full md:w-80">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
           <input
@@ -66,7 +66,7 @@ export default function InterviewRecordsView({ scoreCards }: InterviewRecordsVie
           <button
             onClick={() => setSelectedVerdict("ALL")}
             className={`text-xs font-semibold px-4 py-2 rounded-xl border transition cursor-pointer ${
-              selectedVerdict === "ALL" ? "bg-primary text-white border-primary shadow-sm" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+              selectedVerdict === "ALL" ? "bg-primary/10 text-primary font-bold border-primary shadow-sm" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
             }`}
           >
             全部
@@ -76,7 +76,7 @@ export default function InterviewRecordsView({ scoreCards }: InterviewRecordsVie
               key={verd}
               onClick={() => setSelectedVerdict(verd)}
               className={`text-xs font-semibold px-3.5 py-2 rounded-xl border transition cursor-pointer ${
-                selectedVerdict === verd ? "bg-primary text-white border-primary shadow-sm" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                selectedVerdict === verd ? "bg-primary/10 text-primary font-bold border-primary shadow-sm" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
               }`}
             >
               {verd}
@@ -91,7 +91,7 @@ export default function InterviewRecordsView({ scoreCards }: InterviewRecordsVie
           <div
             key={card.id}
             onClick={() => setActiveCard(card)}
-            className="bg-white/80 hover:bg-white backdrop-blur-md p-5 rounded-2xl border border-white/30 shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between hover:scale-[1.01] duration-200"
+            className="bg-white/80 hover:bg-white backdrop-blur-md p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between hover:scale-[1.01] duration-200"
           >
             <div className="space-y-4">
               {/* Header profile row */}
@@ -266,7 +266,7 @@ export default function InterviewRecordsView({ scoreCards }: InterviewRecordsVie
             <div className="border-t border-slate-100 pt-4 flex items-center justify-end">
               <button
                 onClick={() => setActiveCard(null)}
-                className="font-sans text-xs bg-primary hover:bg-primary-container text-white font-semibold py-2 px-5 rounded-lg transition shadow-md shadow-primary/10 cursor-pointer"
+                className="font-sans text-xs bg-primary/10 text-primary font-bold hover:bg-primary/20 py-2 px-5 rounded-lg transition shadow-sm border border-primary cursor-pointer"
               >
                 确定确定，关闭档案
               </button>

@@ -30,7 +30,7 @@ export default function ScheduleView({ interviews }: ScheduleViewProps) {
   return (
     <div className="space-y-6" id="schedule-calendar-container">
       {/* Title block */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-white/40 shadow-sm">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold font-sans text-slate-900 tracking-tight flex items-center gap-2">
             <CalendarIcon className="w-6 h-6 text-primary" /> 智慧校招与内部面试日程
@@ -57,7 +57,7 @@ export default function ScheduleView({ interviews }: ScheduleViewProps) {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Calendar Monthly Matrix (Col-8) */}
-        <div className="lg:col-span-8 bg-white/75 backdrop-blur-md p-6 rounded-2xl border border-white/50 shadow-sm">
+        <div className="lg:col-span-8 bg-white/75 backdrop-blur-md p-6 rounded-2xl border border-slate-200 shadow-sm">
           <h2 className="text-sm font-bold text-slate-800 font-sans mb-4 block">
             面试时段时空矩阵
           </h2>
@@ -89,7 +89,7 @@ export default function ScheduleView({ interviews }: ScheduleViewProps) {
                   }`}
                 >
                   <span className={`text-[11px] font-black font-mono block w-max h-max rounded-full p-1 leading-none ${
-                    isToday ? "bg-primary text-white" : "text-slate-500"
+                    isToday ? "bg-primary text-white-pure" : "text-slate-500"
                   }`}>
                     {day}
                   </span>

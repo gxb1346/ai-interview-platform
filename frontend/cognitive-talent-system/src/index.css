@@ -1,1 +1,95 @@
 @import "tailwindcss";
+
+@theme {
+  /* ---- Slate 调色板（浅色模式） ---- */
+  --color-slate-50: #F8F9FA;
+  --color-slate-100: #F0F2F5;
+  --color-slate-150: #E8EAED;
+  --color-slate-200: #DEE2E6;
+  --color-slate-250: #CED4DA;
+  --color-slate-300: #ADB5BD;
+  --color-slate-400: #868E96;
+  --color-slate-500: #6C757D;
+  --color-slate-600: #495057;
+  --color-slate-700: #343A40;
+  --color-slate-800: #212529;
+  --color-slate-900: #0D1117;
+
+  /* ---- 强调色：霓虹蓝 / AI 科技感 ---- */
+  --color-primary: #00A8FF;
+  --color-primary-container: #4A90E2;
+  --color-primary-dark: #0088CC;
+
+  /* ---- 自定义颜色 ---- */
+  --color-white: #FFFFFF;
+  --color-white-pure: #FFFFFF;
+
+  /* ---- Emerald（通过/录用） ---- */
+  --color-emerald-50: #ECFDF5;
+  --color-emerald-500: #10B981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #047857;
+  --color-emerald-800: #065F46;
+
+  /* ---- Red（拒绝/删除） ---- */
+  --color-red-50: #FEF2F2;
+  --color-red-100: #FEE2E2;
+  --color-red-500: #EF4444;
+  --color-red-600: #DC2626;
+  --color-red-700: #B91C1C;
+  --color-red-800: #991B1B;
+
+  /* ---- Amber（待定） ---- */
+  --color-amber-50: #FFFBEB;
+  --color-amber-700: #B45309;
+
+  /* ---- 其他 ----- */
+  --color-teal-600: #0D9488;
+  --color-purple-600: #7C3AED;
+
+  /* ---- Rose（删除等） ---- */
+  --color-rose-50: #FFF1F2;
+  --color-rose-100: #FFE4E6;
+  --color-rose-500: #F43F5E;
+  --color-rose-600: #E11D48;
+}
+
+/* 全局浅色背景 */
+body {
+  background-color: #F5F7FA;
+  color: #343A40;
+}
+
+/* 滚动条样式（浅色适配） */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F0F2F5;
+}
+::-webkit-scrollbar-thumb {
+  background: #DEE2E6;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #CED4DA;
+}
+
+/* fade-in 动画 */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* pulse-once 动画 */
+@keyframes pulse-once {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.7; }
+}
+.animate-pulse-once {
+  animation: pulse-once 1s ease-in-out 1;
+}

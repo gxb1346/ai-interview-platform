@@ -7,18 +7,19 @@ import {
   Search, X, Sparkles, Star, Play, Award, CheckCircle2,
   AlertCircle, ChevronRight, UserCheck, UserX, Clock, Mail, Phone, Calendar
 } from "lucide-react";
-import { ResumeVO, ApiResult, TalentStatus } from "../types";
+import { ResumeVO, ApiResult, TalentStatus, Interview } from "../types";
 
 const API_BASE = "http://localhost:8082";
 
 interface TalentPoolViewProps {
   onNavigateToMock: (cand: any) => void;
   onNavigateToInterview: (cand: any) => void;
+  onAddInterview: (int: Interview) => void;
 }
 
 /** 状态中文映射 */
 const STATUS_LABELS: Record<string, string> = {
-  NEW: "待评估",
+  NEW: "已评估",
   INVITED: "已邀约",
   WAITING_INTERVIEW: "待面试",
   PASSED: "面试通过",
@@ -35,7 +36,8 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function TalentPoolView({
   onNavigateToMock,
-  onNavigateToInterview
+  onNavigateToInterview,
+  onAddInterview
 }: TalentPoolViewProps) {
   const [candidates, setCandidates] = useState<ResumeVO[]>([]);
   const [loading, setLoading] = useState(false);
@@ -45,6 +47,11 @@ export default function TalentPoolView({
   const [drawerCandidate, setDrawerCandidate] = useState<ResumeVO | null>(null);
   // 更新状态 loading
   const [updatingId, setUpdatingId] = useState<number | null>(null);
+  // 面试日程安排弹窗
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [scheduledTime, setScheduledTime] = useState("");
+  const [scheduleNotes, setScheduleNotes] = useState("");
 
   const fetchTalentPool = useCallback(async () => {
     setLoading(true);
@@ -75,6 +82,48 @@ export default function TalentPoolView({
     const matchesStatus = selectedStatus === "ALL" || cand.talentStatus === selectedStatus;
     return matchesSearch && matchesStatus;
   });
+
+  // 待面试状态处理 - 弹出时间安排
+  const handleWaitingInterviewClick = () => {
+    setScheduledDate("");
+    setScheduledTime("");
+    setScheduleNotes("");
+    setShowScheduleModal(true);
+  };
+
+  // 确认安排面试时间
+  const handleConfirmSchedule = () => {
+    if (!scheduledDate) {
+      alert("请先选择面试日期");
+      return;
+    }
+    if (!scheduledTime) {
+      alert("请先选择面试时间");
+      return;
+    }
+    if (!drawerCandidate) return;
+
+    const cand = drawerCandidate;
+    const newInt: Interview = {
+      id: "int_" + Date.now(),
+      candidateId: "cand_" + cand.id,
+      candidateName: cand.candidateName || "未知",
+      role: cand.candidateRole || "",
+      scheduledAt: scheduledDate + " " + scheduledTime,
+      status: "pending",
+      suggestedQuestions: [
+        `作为应聘的${cand.candidateRole || "该岗位"}的候选人，谈谈你对该领域的核心看法。`,
+        "说说你在以往工作中攻克的最难技术场景。"
+      ],
+      notes: scheduleNotes || "待面试安排"
+    };
+    onAddInterview(newInt);
+
+    handleUpdateStatus(cand.id, "WAITING_INTERVIEW");
+    setShowScheduleModal(false);
+    setDrawerCandidate(null);
+    onNavigateToInterview(toCandidate(cand));
+  };
 
   // 更新候选人在人才库中的状态
   const handleUpdateStatus = async (id: number, status: string) => {
@@ -207,7 +256,7 @@ export default function TalentPoolView({
       )}
 
       {/* 搜索+筛选 */}
-      <div className="bg-white/70 backdrop-blur-md p-4 rounded-xl border border-white/40 shadow-sm flex flex-col md:flex-row items-center gap-4 justify-between">
+      <div className="bg-white/70 backdrop-blur-md p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center gap-4 justify-between">
         <div className="relative w-full md:w-80">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
           <input
@@ -222,14 +271,14 @@ export default function TalentPoolView({
           <button onClick={() => setSelectedStatus("ALL")}
             className={`text-xs font-semibold px-4 py-2 rounded-xl border transition cursor-pointer ${
               selectedStatus === "ALL"
-                ? "bg-primary text-white border-primary shadow-sm"
+                ? "bg-primary/10 text-primary font-bold border-primary shadow-sm"
                 : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
             }`}>全部</button>
           {["NEW", "INVITED", "WAITING_INTERVIEW", "PASSED", "REJECTED"].map((status) => (
             <button key={status} onClick={() => setSelectedStatus(status)}
               className={`text-xs font-semibold px-3.5 py-2 rounded-xl border transition cursor-pointer ${
                 selectedStatus === status
-                  ? "bg-primary text-white border-primary shadow-sm"
+                  ? "bg-primary/10 text-primary font-bold border-primary shadow-sm"
                   : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
               }`}>{STATUS_LABELS[status]}</button>
           ))}
@@ -246,7 +295,7 @@ export default function TalentPoolView({
         {filteredCandidates.map((cand) => (
           <div key={cand.id}
             onClick={() => setDrawerCandidate(cand)}
-            className="bg-white/80 hover:bg-white backdrop-blur-md p-5 rounded-2xl border border-white/30 shadow-sm hover:shadow-lg transition duration-300 flex flex-col justify-between cursor-pointer group hover:scale-[1.01]"
+            className="bg-white/80 hover:bg-white backdrop-blur-md p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition duration-300 flex flex-col justify-between cursor-pointer group hover:scale-[1.01]"
           >
             <div>
               <div className="flex items-start justify-between gap-4">
@@ -306,8 +355,8 @@ export default function TalentPoolView({
                   提纲设想
                 </button>
                 <button onClick={(e) => { e.stopPropagation(); onNavigateToMock(toCandidate(cand)); }}
-                  className="text-[10px] font-bold text-white bg-primary hover:bg-primary-container px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer">
-                  <Play className="w-2.5 h-2.5 fill-white" />
+                  className="text-[10px] font-bold text-primary bg-primary/10 hover:bg-primary/20 px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer">
+                  <Play className="w-2.5 h-2.5" />
                   提枪面试
                 </button>
               </div>
@@ -444,11 +493,17 @@ export default function TalentPoolView({
                 <div className="flex flex-wrap gap-2">
                   {["NEW", "INVITED", "WAITING_INTERVIEW", "PASSED", "REJECTED"].map((status) => (
                     <button key={status}
-                      onClick={() => handleUpdateStatus(drawerCandidate.id, status)}
+                      onClick={() => {
+                        if (status === "WAITING_INTERVIEW" && drawerCandidate.talentStatus !== "WAITING_INTERVIEW") {
+                          handleWaitingInterviewClick();
+                        } else {
+                          handleUpdateStatus(drawerCandidate.id, status);
+                        }
+                      }}
                       disabled={updatingId === drawerCandidate.id}
                       className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition cursor-pointer disabled:opacity-50 ${
                         drawerCandidate.talentStatus === status
-                          ? "bg-primary text-white border-primary"
+                          ? "bg-primary/10 text-primary font-bold border-primary"
                           : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                       }`}>
                       {updatingId === drawerCandidate.id ? "..." : STATUS_LABELS[status]}
@@ -470,11 +525,76 @@ export default function TalentPoolView({
                   拟制问题提纲
                 </button>
                 <button onClick={() => { setDrawerCandidate(null); onNavigateToMock(toCandidate(drawerCandidate)); }}
-                  className="font-sans text-xs text-white bg-primary hover:bg-primary-container font-semibold py-2.5 px-5 rounded-lg transition shadow-md flex items-center gap-1 cursor-pointer">
-                  <Play className="w-3 h-3 fill-white" />
+                  className="font-sans text-xs text-primary bg-primary/10 hover:bg-primary/20 font-semibold py-2.5 px-5 rounded-lg transition shadow-sm flex items-center gap-1 cursor-pointer">
+                  <Play className="w-3 h-3" />
                   一键模拟面试
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 面试时间安排弹窗 */}
+      {showScheduleModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-xl p-6 mx-4 space-y-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-800 font-sans flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-primary" />
+                安排面试时间
+              </h3>
+              <button onClick={() => setShowScheduleModal(false)}
+                className="w-7 h-7 rounded-full border border-slate-100 flex items-center justify-center hover:bg-slate-50 transition cursor-pointer">
+                <X className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-500 font-semibold font-sans">面试日期 *</label>
+                  <input
+                    type="date"
+                    required
+                    value={scheduledDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    className="w-full text-xs py-2.5 px-3 bg-white text-slate-800 rounded-xl border border-slate-300 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition font-sans"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-500 font-semibold font-sans">面试时间 *</label>
+                  <input
+                    type="time"
+                    required
+                    value={scheduledTime}
+                    onChange={(e) => setScheduledTime(e.target.value)}
+                    className="w-full text-xs py-2.5 px-3 bg-white text-slate-800 rounded-xl border border-slate-300 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition font-sans"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-500 font-semibold font-sans">面试备注 (选填)</label>
+                <input
+                  type="text"
+                  value={scheduleNotes}
+                  onChange={(e) => setScheduleNotes(e.target.value)}
+                  placeholder="例如：技术面，考察微服务架构..."
+                  className="w-full text-xs py-2.5 px-3 bg-white text-slate-800 rounded-xl border border-slate-300 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition font-sans"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
+              <button onClick={() => setShowScheduleModal(false)}
+                className="text-xs font-semibold py-2.5 px-5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer">
+                取消
+              </button>
+              <button onClick={handleConfirmSchedule}
+                className="text-xs font-semibold py-2.5 px-5 rounded-xl bg-primary/10 text-primary font-bold border border-primary hover:bg-primary/20 transition cursor-pointer shadow-sm flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5" />
+                确定安排
+              </button>
             </div>
           </div>
         </div>

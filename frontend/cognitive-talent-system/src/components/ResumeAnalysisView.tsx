@@ -302,7 +302,7 @@ export default function ResumeAnalysisView({
   return (
     <div className="space-y-6" id="resume-analysis-container">
       {/* 顶部标题栏 */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-white/40 shadow-sm">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold font-sans text-slate-900 tracking-tight flex items-center gap-2">
             <Sparkles className="w-6 h-6 text-primary" /> 简历智能神经分析
@@ -316,7 +316,7 @@ export default function ResumeAnalysisView({
       {!analyzedCandidate && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* 左侧上传区 */}
-          <div className="lg:col-span-7 bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-white/40 shadow-sm space-y-4">
+          <div className="lg:col-span-7 bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
             {/* 目标岗位输入 */}
             <div className="space-y-2">
               <label className="text-sm font-semibold text-slate-700 font-sans block">
@@ -390,7 +390,7 @@ export default function ResumeAnalysisView({
             {selectedFile && !loading && (
               <button
                 onClick={() => handleUploadAndAnalyze(selectedFile)}
-                className="w-full font-sans text-sm font-semibold text-white bg-gradient-to-r from-primary to-primary-container hover:shadow-lg hover:shadow-primary/20 py-3.5 px-6 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full font-sans text-sm font-semibold text-primary bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 hover:from-primary/20 hover:to-primary/10 py-3.5 px-6 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Sparkles className="w-4.5 h-4.5" />
                 分析此简历
@@ -466,7 +466,7 @@ export default function ResumeAnalysisView({
       {analyzedCandidate && (
         <div className="space-y-6 animate-fade-in">
           {/* 头部信息 */}
-          <div className="bg-white/80 backdrop-blur-md p-6 rounded-2xl border border-white/50 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div className="bg-white/80 backdrop-blur-md p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <img
                 src={analyzedCandidate.avatar}
@@ -523,7 +523,7 @@ export default function ResumeAnalysisView({
 
           {/* 雷达图 + 亮点 */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-5 bg-white/80 backdrop-blur-md p-6 rounded-2xl border border-white/50 shadow-sm flex flex-col justify-between">
+            <div className="lg:col-span-5 bg-white/80 backdrop-blur-md p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
               <div>
                 <h3 className="text-sm font-bold text-slate-800 font-sans border-b border-slate-100 pb-3 block">
                   五大维度能力神经映射
@@ -551,7 +551,7 @@ export default function ResumeAnalysisView({
 
             {/* 优势 + 劣势 + AI总结 */}
             <div className="lg:col-span-7 space-y-6">
-              <div className="bg-white/80 backdrop-blur-md p-6 rounded-2xl border border-white/50 shadow-sm space-y-3">
+              <div className="bg-white/80 backdrop-blur-md p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3">
                 <h3 className="text-sm font-bold text-slate-800 font-sans flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-primary" /> AI HR 评估决策书
                 </h3>
@@ -598,7 +598,7 @@ export default function ResumeAnalysisView({
               </div>
 
               {/* 底部操作 */}
-              <div className="bg-white/80 p-5 rounded-2xl border border-white/50 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="bg-white/80 p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
                 <button
                   onClick={handleReset}
                   className="w-full sm:w-auto font-sans text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-5 rounded-xl transition cursor-pointer flex items-center gap-1.5"
@@ -618,7 +618,7 @@ export default function ResumeAnalysisView({
 
                   <button
                     onClick={() => onNavigateToMock(analyzedCandidate)}
-                    className="flex-1 sm:flex-initial font-sans text-xs text-white bg-primary hover:bg-primary-container font-semibold py-2.5 px-5 rounded-xl transition shadow-md shadow-primary/10 flex items-center justify-center gap-1 cursor-pointer"
+                    className="flex-1 sm:flex-initial font-sans text-xs text-primary bg-primary/10 hover:bg-primary/20 font-semibold py-2.5 px-5 rounded-xl transition flex items-center justify-center gap-1 cursor-pointer border border-primary/10"
                   >
                     <Play className="w-3 h-3 fill-white" />
                     开启模拟面试

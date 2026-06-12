@@ -1,12 +1,43 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Send, Sparkles, Trophy, Award, CheckCircle2, AlertTriangle, ShieldCheck, HelpCircle, RefreshCw, MessageSquareCode, Clock } from "lucide-react";
-import { Candidate, ChatMessage, ScoreCard } from "../types";
+import { Send, Sparkles, Trophy, Award, CheckCircle2, AlertTriangle, ShieldCheck, HelpCircle, RefreshCw, MessageSquareCode, Clock, Mic, MicOff } from "lucide-react";
+import { Candidate, ChatMessage, ScoreCard, ResumeVO, ApiResult } from "../types";
 
 interface MockInterviewViewProps {
   candidates: Candidate[];
   preSelectedCandidate: Candidate | null;
   onSaveScoreCard: (card: ScoreCard) => void;
   onNavigateToRecords: () => void;
+}
+
+const API_BASE = "http://localhost:8082";
+
+function toCandidate(cand: ResumeVO): Candidate {
+  return {
+    id: "cand_" + cand.id,
+    name: cand.candidateName || "未知",
+    role: cand.candidateRole || "",
+    experienceYears: cand.experienceYears || 0,
+    education: cand.education || "未知",
+    status: cand.talentStatus as any,
+    avatar: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&h=150&fit=crop&crop=face",
+    matchScore: cand.matchScore || 0,
+    email: cand.email || "",
+    phone: cand.phone || "",
+    competencies: cand.competencies
+      ? {
+          technical: cand.competencies.technical ?? 5,
+          communication: cand.competencies.communication ?? 5,
+          problemSolving: cand.competencies.problemSolving ?? 5,
+          teamFit: cand.competencies.teamFit ?? 5,
+          drive: cand.competencies.drive ?? 5,
+        }
+      : { technical: 5, communication: 5, problemSolving: 5, teamFit: 5, drive: 5 },
+    strengths: cand.strengths || [],
+    weaknesses: cand.weaknesses || [],
+    highlights: cand.highlights || [],
+    aiSummary: cand.aiSummary || "",
+    analyzedAt: cand.analyzedAt || ""
+  };
 }
 
 export default function MockInterviewView({
@@ -27,7 +58,58 @@ export default function MockInterviewView({
   const [evaluating, setEvaluating] = useState(false);
   const [scoreCard, setScoreCard] = useState<ScoreCard | null>(null);
 
+  // 模拟面试模式: text | voice
+  const [interviewMode, setInterviewMode] = useState<"text" | "voice">("text");
+  const [isRecording, setIsRecording] = useState(false);
+  const [interimText, setInterimText] = useState("");
+  const recognitionRef = useRef<any>(null);
+
+  // 面试准备选项
+  const [interviewDirection, setInterviewDirection] = useState("");
+  const [interviewLevel, setInterviewLevel] = useState("中级");
+  const [customJDText, setCustomJDText] = useState("");
+
+  // 人才库候选人（从后端 API 拉取）
+  const [talentCandidates, setTalentCandidates] = useState<Candidate[]>([]);
+
+  const DIRECTIONS = [
+    "AI Agent开发", "算法与数据结构", "阿里后端", "字节后端",
+    "前端工程", "Java后端开发", "腾讯后端", "Python后端开发",
+    "系统设计", "测试开发", "自定义JD"
+  ];
+
+  const LEVELS = ["校招", "中级", "高级"];
+  const YEARS_OPTIONS = ["0-1年", "1-3年", "3年+"];
+  const LEVEL_YEAR_MAP: Record<string, string> = {
+    "校招": "0-1年",
+    "中级": "1-3年",
+    "高级": "3年+"
+  };
+
   const messageEndRef = useRef<HTMLDivElement>(null);
+
+  // 组件挂载时从后端拉取人才库候选人
+  useEffect(() => {
+    fetch(`${API_BASE}/api/resume/talent-pool`)
+      .then(res => res.json())
+      .then((json: ApiResult<ResumeVO[]>) => {
+        if (json.code === 200 && json.data) {
+          setTalentCandidates(json.data.map(toCandidate));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // 合并预植入候选人 + 人才库候选人
+  const allCandidates = React.useMemo(() => {
+    const merged = [...candidates];
+    talentCandidates.forEach(tc => {
+      if (!merged.some(c => c.id === tc.id)) {
+        merged.push(tc);
+      }
+    });
+    return merged;
+  }, [candidates, talentCandidates]);
 
   // Auto select preselected candidate if passed from other views
   useEffect(() => {
@@ -50,7 +132,7 @@ export default function MockInterviewView({
     messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, thinking]);
 
-  const activeCand = candidates.find(c => c.id === activeCandidateId);
+  const activeCand = allCandidates.find(c => c.id === activeCandidateId);
 
   const startInterview = () => {
     if (!activeCand) return;
@@ -62,6 +144,7 @@ export default function MockInterviewView({
         id: "msg_init",
         sender: "interviewer",
         text: `您好，${activeCand.name}。我是 RecruitAI 的高级AI面试官。今天我们将围绕“${activeCand.role}”岗位进行一场深度的模拟技术与沟通面。
+面试方向：【${interviewDirection}】${customJDText ? "（自定义JD: " + customJDText + "）" : ""}，难度等级：【${interviewLevel}】。
 我已经通读并分析了您的经历详情，特别是关于 ${(activeCand.strengths && activeCand.strengths[0]) || "您出色的过往高抗压项目构建交付"}。
 首先，作为一个热身开篇，能详细聊一下在该项目推进中，您最感吃力、最困难的技术挑战，以及您当时是如何主导破局、得出量化收益的吗？`,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -212,10 +295,68 @@ export default function MockInterviewView({
     return `${mins < 10 ? "0" : ""}${mins}:${remainSecs < 10 ? "0" : ""}${remainSecs}`;
   };
 
+  // 语音识别相关
+  const startVoiceRecording = () => {
+    const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionAPI) {
+      alert("抱歉，您的浏览器不支持语音识别功能，请使用 Chrome 浏览器。");
+      return;
+    }
+    const recognition = new SpeechRecognitionAPI();
+    recognition.lang = "zh-CN";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (event: any) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          setInputText((prev) => prev + transcript);
+        } else {
+          interim += transcript;
+        }
+      }
+      setInterimText(interim);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("语音识别错误:", event.error);
+      setIsRecording(false);
+      setInterimText("");
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+      setInterimText("");
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsRecording(true);
+  };
+
+  const stopVoiceRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    setIsRecording(false);
+    setInterimText("");
+  };
+
+  const toggleVoiceRecording = () => {
+    if (isRecording) {
+      stopVoiceRecording();
+    } else {
+      startVoiceRecording();
+    }
+  };
+
   return (
     <div className="space-y-6" id="mock-interview-wrapper">
       {/* Search Header banner */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-white/40 shadow-sm">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold font-sans text-slate-900 tracking-tight flex items-center gap-2">
             <MessageSquareCode className="w-6 h-6 text-primary" /> 全时互动模拟面试舱
@@ -224,52 +365,136 @@ export default function MockInterviewView({
             在此雇佣专门的 **AI 面试官智能体**。考生可在此扮演面试者并逐次键入回答，终局一键获取雷达多维成绩单书。
           </p>
         </div>
-
-        {!interviewStarted && (
-          <div className="flex items-center gap-3 w-full md:w-auto">
-            <select
-              value={activeCandidateId}
-              onChange={(e) => setActiveCandidateId(e.target.value)}
-              className="text-xs py-2.5 px-3 bg-white border border-slate-200 focus:border-primary rounded-xl outline-none transition font-sans cursor-pointer w-full md:w-56"
-            >
-              {candidates.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} - {c.role} (匹配 {c.matchScore}%)
-                </option>
-              ))}
-            </select>
-
-            <button
-              onClick={startInterview}
-              disabled={!activeCandidateId}
-              className="font-sans text-xs font-semibold text-white bg-primary hover:bg-primary-container py-2.5 px-5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-primary/10 select-none whitespace-nowrap"
-            >
-              <PlayMeIcon className="w-3 h-3 fill-white" />
-              开启拟真模拟模拟
-            </button>
-          </div>
-        )}
-
-        {interviewStarted && (
-          <div className="flex items-center gap-4 text-xs font-semibold text-slate-600 bg-slate-100/80 px-4 py-2 rounded-xl border border-slate-200">
-            <Clock className="w-4 h-4 text-primary animate-pulse" />
-            <span>计时器: {formatTimer(timeElapsed)}</span>
-            <span className="text-[10px] text-slate-400 font-normal">| 人选：{activeCand?.name}</span>
-          </div>
-        )}
       </div>
 
-      {/* Main Interactive Space */}
+      {/* 面试准备面板 — 选择模式/方向/难度后开始面试 */}
       {!interviewStarted && !scoreCard && (
-        <div className="bg-slate-50 border border-slate-100 rounded-3xl p-12 text-center text-slate-400 space-y-4 max-w-xl mx-auto mt-6">
-          <div className="w-16 h-16 bg-primary/5 text-primary rounded-full flex items-center justify-center mx-auto shadow-inner">
-            <MessageSquareCode className="w-8 h-8" />
-          </div>
-          <h3 className="text-base font-bold text-slate-700 font-sans">准备好参加模拟压力面试了吗？</h3>
-          <p className="text-xs leading-relaxed text-slate-500 font-sans max-w-sm mx-auto">
-            1. 在右上角选定需执行测评的角色简历。<br/>
-            2. 点击“开启拟真模拟”进入互动聊天客。AI智能体将参考其优势亮点，由浅入深，给出真实的架构质问、高频抢答以及沟通协作细节测速。
-          </p>
+        <div className="bg-white/80 backdrop-blur-md border border-slate-200 shadow-sm rounded-2xl p-6 md:p-8 space-y-7">
+            {/* 候选人信息 */}
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">
+                  {activeCand ? activeCand.name.charAt(0) : "?"}
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-800 font-sans">{activeCand?.name || "请选择候选人"}</h2>
+                  <p className="text-xs text-slate-500 font-sans">{activeCand?.role || "—"} · {activeCand?.education || ""}</p>
+                </div>
+              </div>
+              <select
+                value={activeCandidateId}
+                onChange={(e) => setActiveCandidateId(e.target.value)}
+                className="text-xs py-2.5 px-3 bg-white border border-slate-200 focus:border-primary rounded-xl outline-none transition font-sans cursor-pointer w-full md:w-56"
+              >
+                {allCandidates.length === 0 && <option value="">暂无候选人</option>}
+                {allCandidates.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} - {c.role} (匹配 {c.matchScore}%)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <hr className="border-slate-100" />
+
+            {/* 面试模式 */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-slate-800 font-sans">面试模式</h3>
+              <div className="flex items-center gap-4">
+                <button onClick={() => setInterviewMode("text")}
+                  className={`flex-1 text-sm font-bold px-5 py-4 rounded-2xl border-2 transition-all cursor-pointer ${
+                    interviewMode === "text"
+                      ? "bg-primary/10 text-primary border-primary shadow-md ring-4 ring-primary/20"
+                      : "bg-white text-slate-600 border-slate-200 hover:border-primary/40"
+                  }`}>
+                  <MessageSquareCode className="w-5 h-5 inline mr-2" />
+                  <div className="inline-block text-left">
+                    <div>文字模拟</div>
+                    <div className="text-[10px] font-normal opacity-70">推荐：更稳定，更适合系统化刷题与复盘</div>
+                  </div>
+                </button>
+                <button onClick={() => setInterviewMode("voice")}
+                  className={`flex-1 text-sm font-bold px-5 py-4 rounded-2xl border-2 transition-all cursor-pointer ${
+                    interviewMode === "voice"
+                      ? "bg-primary/10 text-primary border-primary shadow-md ring-4 ring-primary/20"
+                      : "bg-white text-slate-600 border-slate-200 hover:border-primary/40"
+                  }`}>
+                  <Mic className="w-5 h-5 inline mr-2" />
+                  <div className="inline-block text-left">
+                    <div>语音模拟</div>
+                    <div className="text-[10px] font-normal opacity-70">实时语音对话，更偏临场模拟</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* 面试方向 */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-slate-800 font-sans">面试方向</h3>
+              <div className="grid grid-cols-4 gap-2.5">
+                {DIRECTIONS.map((dir) => (
+                  <button key={dir} onClick={() => {
+                    setInterviewDirection(dir);
+                    if (dir !== "自定义JD") setCustomJDText("");
+                  }}
+                    className={`text-xs font-semibold px-4 py-2.5 rounded-xl border-2 transition-all cursor-pointer ${
+                      interviewDirection === dir
+                        ? "bg-primary/10 text-primary border-primary shadow-sm ring-2 ring-primary/20"
+                        : "bg-white text-slate-600 border-slate-200 hover:border-primary/30 hover:bg-slate-50"
+                    }`}>
+                    {dir}
+                  </button>
+                ))}
+              </div>
+              {interviewDirection === "自定义JD" && (
+                <textarea
+                  value={customJDText}
+                  onChange={(e) => setCustomJDText(e.target.value)}
+                  placeholder="请粘贴或输入自定义职位描述（JD）..."
+                  rows={4}
+                  className="w-full text-xs p-3 bg-white border border-slate-200 focus:border-primary rounded-xl outline-none transition font-sans"
+                />
+              )}
+            </div>
+
+            {/* 难度等级 */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-slate-800 font-sans">难度等级</h3>
+              <div className="grid grid-cols-3 gap-3">
+                {LEVELS.map((lv) => (
+                  <button key={lv} onClick={() => setInterviewLevel(lv)}
+                    className={`text-xs font-semibold px-4 py-3 rounded-xl border-2 transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                      interviewLevel === lv
+                        ? "bg-primary/10 text-primary border-primary shadow-sm ring-2 ring-primary/20"
+                        : "bg-white text-slate-600 border-slate-200 hover:border-primary/30"
+                    }`}>
+                    <span>{lv}</span>
+                    <span className="text-[10px] opacity-60">{LEVEL_YEAR_MAP[lv]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 开始面试按钮 */}
+            <div className="pt-2 border-t border-slate-100">
+              <button
+                onClick={startInterview}
+                disabled={!activeCandidateId || !interviewDirection}
+                className="w-full font-sans text-sm font-bold text-primary bg-primary/10 border-2 border-primary/30 hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed py-3.5 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+              >
+                <MessageSquareCode className="w-4 h-4" />
+                开始{interviewMode === "text" ? "文字" : "语音"}模拟
+              </button>
+            </div>
+        </div>
+      )}
+
+      {interviewStarted && (
+        <div className="flex items-center gap-4 text-xs font-semibold text-slate-600 bg-slate-100/80 px-4 py-2 rounded-xl border border-slate-200">
+          <Clock className="w-4 h-4 text-primary animate-pulse" />
+          <span>计时器: {formatTimer(timeElapsed)}</span>
+          <span className="text-[10px] text-slate-400 font-normal">| 人选：{activeCand?.name}</span>
+          {interviewDirection && <span className="text-[10px] text-primary font-normal">| 方向：{interviewDirection}</span>}
         </div>
       )}
 
@@ -278,7 +503,7 @@ export default function MockInterviewView({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
           
           {/* Chat Pane (Col-9) */}
-          <div className="lg:col-span-8 bg-white/70 backdrop-blur-md rounded-2xl border border-white/50 shadow-lg flex flex-col justify-between h-[580px] overflow-hidden">
+          <div className="lg:col-span-8 bg-white/70 backdrop-blur-md rounded-2xl border border-slate-200 shadow-lg flex flex-col justify-between h-[580px] overflow-hidden">
             
             {/* Header profile info */}
             <div className="bg-slate-50 hover:bg-slate-100/50 p-4 border-b border-slate-100 flex items-center justify-between">
@@ -291,7 +516,7 @@ export default function MockInterviewView({
 
               <button
                 onClick={handleEvaluateInterview}
-                className="text-[10px] font-extrabold text-white bg-gradient-to-r from-primary to-primary-container hover:shadow-md py-2 px-4 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow shadow-primary/5 animate-pulse"
+                className="text-[10px] font-extrabold text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20 py-2 px-4 rounded-lg flex items-center gap-1 transition-all cursor-pointer shadow-sm"
               >
                 <Trophy className="w-3.5 h-3.5" />
                 结束面试并生成AI评估成绩单
@@ -319,7 +544,7 @@ export default function MockInterviewView({
                     <div
                       className={`text-xs py-2.5 px-4 rounded-2xl font-sans shadow-sm leading-relaxed ${
                         m.sender === "candidate"
-                          ? "bg-primary text-white rounded-tr-none"
+                          ? "bg-primary text-white-pure rounded-tr-none"
                           : "bg-white text-slate-700 border border-slate-150 rounded-tl-none"
                       }`}
                     >
@@ -351,22 +576,93 @@ export default function MockInterviewView({
             </div>
 
             {/* Input fields form bottom area */}
-            <form onSubmit={handleSendMessage} className="p-4 border-t border-slate-100 bg-white flex items-center gap-3">
-              <input
-                type="text"
-                disabled={thinking}
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="请输入您的技术应答（可结合实际高可用案例或量化指标表现）..."
-                className="flex-1 text-xs py-3 px-4 bg-slate-50 hover:bg-slate-100/80 focus:bg-white rounded-xl border border-slate-200 focus:border-primary outline-none transition font-sans"
-              />
-              <button
-                type="submit"
-                disabled={thinking || !inputText.trim()}
-                className="w-10 h-10 bg-primary hover:bg-primary-container disabled:bg-slate-300 rounded-xl flex items-center justify-center text-white font-semibold transition shrink-0 cursor-pointer shadow-md shadow-primary/10"
-              >
-                <Send className="w-4.5 h-4.5" />
-              </button>
+            <form onSubmit={handleSendMessage} className="p-4 border-t border-slate-100 bg-white flex flex-col gap-3">
+              {interviewMode === "text" ? (
+                <div className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    disabled={thinking}
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    placeholder="请输入您的技术应答（可结合实际高可用案例或量化指标表现）..."
+                    className="flex-1 text-xs py-3 px-4 bg-slate-50 hover:bg-slate-100/80 focus:bg-white rounded-xl border border-slate-200 focus:border-primary outline-none transition font-sans"
+                  />
+                  <button
+                    type="submit"
+                    disabled={thinking || !inputText.trim()}
+                    className="w-10 h-10 bg-primary hover:bg-primary-container disabled:bg-slate-300 rounded-xl flex items-center justify-center text-white-pure font-semibold transition shrink-0 cursor-pointer shadow-md shadow-primary/10"
+                  >
+                    <Send className="w-4.5 h-4.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={toggleVoiceRecording}
+                      disabled={thinking}
+                      className={`w-12 h-12 rounded-xl flex items-center justify-center font-semibold transition shrink-0 cursor-pointer shadow-sm border ${
+                        isRecording
+                          ? "bg-red-50 text-red-600 border-red-300 animate-pulse ring-2 ring-red-200"
+                          : "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
+                      }`}
+                    >
+                      {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                    </button>
+                    <input
+                      type="text"
+                      disabled={thinking}
+                      value={inputText}
+                      onChange={(e) => setInputText(e.target.value)}
+                      placeholder={isRecording ? "正在聆听..." : "点击麦克风开始语音输入，或手动输入..."}
+                      className="flex-1 text-xs py-3 px-4 bg-slate-50 hover:bg-slate-100/80 focus:bg-white rounded-xl border border-slate-200 focus:border-primary outline-none transition font-sans"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={thinking || !inputText.trim()}
+                    className="w-10 h-10 bg-primary hover:bg-primary-container disabled:bg-slate-300 rounded-xl flex items-center justify-center text-white-pure font-semibold transition shrink-0 cursor-pointer shadow-md shadow-primary/10"
+                  >
+                    <Send className="w-4.5 h-4.5" />
+                  </button>
+                </div>
+              )}
+              {/* 语音识别实时转写提示 */}
+              {isRecording && interimText && (
+                <div className="text-[10px] text-slate-400 italic bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
+                  🎤 识别中：{interimText}
+                </div>
+              )}
+              {isRecording && (
+                <div className="flex items-center gap-1.5 text-[10px] text-red-500 font-semibold">
+                  <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                  正在录音中... 点击红色麦克风按钮停止
+                </div>
+              )}
+              {interviewMode === "voice" && !isRecording && (
+                <div className="text-[10px] text-slate-400 italic">
+                  点击麦克风按钮开始语音输入，系统自动将语音转为文字
+                </div>
+              )}
+              {/* 模式提示 */}
+              {interviewStarted && (
+                <div className="text-[10px] text-slate-400 text-center border-t border-slate-100 pt-2 mt-1">
+                  当前模式：{interviewMode === "text" ? "📝 文字模拟" : "🎤 语音模拟"}
+                  {interviewMode === "voice" && (
+                    <button onClick={() => setInterviewMode("text")}
+                      className="ml-2 text-primary hover:underline cursor-pointer">
+                      切换到文字模式
+                    </button>
+                  )}
+                  {interviewMode === "text" && (
+                    <button onClick={() => setInterviewMode("voice")}
+                      className="ml-2 text-primary hover:underline cursor-pointer">
+                      切换到语音模式
+                    </button>
+                  )}
+                </div>
+              )}
             </form>
           </div>
 
@@ -548,7 +844,7 @@ export default function MockInterviewView({
 
             <button
               onClick={onNavigateToRecords}
-              className="font-sans text-xs text-white bg-primary hover:bg-primary-container font-semibold py-2.5 px-6 rounded-xl shadow-md cursor-pointer"
+              className="font-sans text-xs text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20 font-semibold py-2.5 px-6 rounded-xl shadow-sm cursor-pointer"
             >
               查看测评历史记录
             </button>

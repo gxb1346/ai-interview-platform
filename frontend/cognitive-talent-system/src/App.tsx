@@ -3,14 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   FileText,
   Users,
   Film,
   MessageSquareCode,
   History,
-  Calendar,
   Sparkles,
   Bell,
   Menu,
@@ -43,17 +42,43 @@ type ActiveView =
   | "INTERVIEW_RECORDS"
   | "SCHEDULE";
 
+// 从 localStorage 读取数据，失败则回退到预设数据
+function loadFromStorage<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw) as T;
+  } catch {}
+  return fallback;
+}
+
+function saveToStorage<T>(key: string, data: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch {}
+}
+
 export default function App() {
   const [currentView, setCurrentView] = useState<ActiveView>("RESUME_ANALYSIS");
   
-  // App Global Sync States
-  const [candidates, setCandidates] = useState<Candidate[]>(PRESEEDED_CANDIDATES);
-  const [interviews, setInterviews] = useState<Interview[]>(PRESEEDED_INTERVIEWS);
-  const [scoreCards, setScoreCards] = useState<ScoreCard[]>(PRESEEDED_SCORECARDS);
+  // App Global Sync States — 优先从 localStorage 恢复
+  const [candidates, setCandidates] = useState<Candidate[]>(
+    () => loadFromStorage("recruit_candidates", PRESEEDED_CANDIDATES)
+  );
+  const [interviews, setInterviews] = useState<Interview[]>(
+    () => loadFromStorage("recruit_interviews", PRESEEDED_INTERVIEWS)
+  );
+  const [scoreCards, setScoreCards] = useState<ScoreCard[]>(
+    () => loadFromStorage("recruit_scorecards", PRESEEDED_SCORECARDS)
+  );
   const [preSelectedCandidate, setPreSelectedCandidate] = useState<Candidate | null>(null);
 
   // Search input matching local list
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // 数据变更时自动持久化到 localStorage
+  useEffect(() => { saveToStorage("recruit_candidates", candidates); }, [candidates]);
+  useEffect(() => { saveToStorage("recruit_interviews", interviews); }, [interviews]);
+  useEffect(() => { saveToStorage("recruit_scorecards", scoreCards); }, [scoreCards]);
 
   // Add Candidate to list
   const handleAddCandidate = (cand: Candidate) => {
@@ -95,11 +120,21 @@ export default function App() {
   const handleNavigateToMock = (cand: Candidate) => {
     setPreSelectedCandidate(cand);
     setCurrentView("MOCK_INTERVIEW");
+    // 同步候选人到全局列表，确保模拟面试页面可选
+    setCandidates(prev => {
+      if (prev.some(c => c.id === cand.id)) return prev;
+      return [cand, ...prev];
+    });
   };
 
   const handleNavigateToInterview = (cand: Candidate) => {
     setPreSelectedCandidate(cand);
     setCurrentView("INTERVIEW_CENTER");
+    // 同步新候选人到全局列表，确保面试中心下拉框可选
+    setCandidates(prev => {
+      if (prev.some(c => c.id === cand.id)) return prev;
+      return [cand, ...prev];
+    });
   };
 
   // Switch View name label maps
@@ -125,20 +160,20 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#faf8ff] text-[#131b2e] flex flex-col font-sans selection:bg-primary/10 select-none">
+    <div className="min-h-screen bg-[#F5F7FA] text-slate-800 flex flex-col font-sans selection:bg-primary/10 select-none">
       {/* Absolute top grid wrapper */}
       <div className="flex flex-1 items-stretch overflow-hidden">
         
         {/* Left Sidebar Menu Layout */}
         <aside
-          className={`fixed inset-y-0 left-0 bg-white border-r border-[#eaedff] w-64 z-30 transition-transform transform md:translate-x-0 flex flex-col justify-between p-5 md:static ${
+          className={`fixed inset-y-0 left-0 bg-white border-r border-slate-200 w-64 z-30 transition-transform transform md:translate-x-0 flex flex-col justify-between p-5 md:static ${
             mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           {/* Brand Logo & descriptive headers */}
           <div className="space-y-6">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-primary hover:bg-primary-container rounded-xl flex items-center justify-center text-white shadow-md shadow-primary/25 cursor-pointer">
+              <div className="w-10 h-10 bg-primary hover:bg-primary-container rounded-xl flex items-center justify-center text-white-pure shadow-md shadow-primary/25 cursor-pointer">
                 <BrainCircuit className="w-5 h-5 animate-pulse" />
               </div>
               <div className="space-y-0.5">
@@ -160,7 +195,6 @@ export default function App() {
                 { id: "INTERVIEW_CENTER", label: "面试中心", icon: Video },
                 { id: "MOCK_INTERVIEW", label: "模拟面试", icon: MessageSquareCode },
                 { id: "INTERVIEW_RECORDS", label: "面试记录", icon: History },
-                { id: "SCHEDULE", label: "日程安排", icon: Calendar },
               ].map((item) => {
                 const IconComponent = item.icon;
                 const isActive = currentView === item.id;
@@ -170,12 +204,11 @@ export default function App() {
                     key={item.id}
                     onClick={() => {
                       setCurrentView(item.id as ActiveView);
-                      setMobileSidebarOpen(false);
                     }}
                     className={`w-full text-xs font-semibold py-3 px-4 rounded-xl flex items-center gap-3 transition-colors cursor-pointer justify-start ${
                       isActive
-                        ? "bg-primary text-white shadow-md shadow-primary/15"
-                        : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                        ? "bg-primary/10 text-primary font-bold shadow-sm border-l-4 border-primary"
+                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                     }`}
                   >
                     <IconComponent className="w-4 h-4 shrink-0" />
@@ -187,7 +220,7 @@ export default function App() {
           </div>
 
           {/* User profile bottom corner */}
-          <div className="border-t border-[#eaedff] pt-4 mt-6">
+          <div className="border-t border-slate-200 pt-4 mt-6">
             <div className="flex items-center gap-3 group">
               <img
                 src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop&crop=face"
@@ -218,7 +251,7 @@ export default function App() {
         {/* Main Content Dashboard Frame */}
         <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
           {/* Header Top Nav bar */}
-          <header className="bg-white/80 backdrop-blur-md border-b border-[#eaedff] py-4 px-6 flex items-center justify-between gap-4 sticky top-0 z-10">
+          <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 py-4 px-6 flex items-center justify-between gap-4 sticky top-0 z-10">
             {/* Left section displays screen name or mobile toggler */}
             <div className="flex items-center gap-3">
               <button
@@ -237,7 +270,7 @@ export default function App() {
             <div className="flex items-center gap-3">
               <div className="relative cursor-pointer hover:scale-105 transition">
                 <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse border-2 border-white" />
-                <button className="w-9 h-9 rounded-xl border border-[#eaedff] bg-white flex items-center justify-center hover:bg-slate-50 cursor-pointer">
+                <button className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-50 cursor-pointer">
                   <Bell className="w-4 h-4 text-slate-500" />
                 </button>
               </div>
@@ -274,6 +307,7 @@ export default function App() {
               <TalentPoolView
                 onNavigateToMock={handleNavigateToMock}
                 onNavigateToInterview={handleNavigateToInterview}
+                onAddInterview={handleAddInterview}
               />
             )}
 

@@ -182,7 +182,7 @@ export default function ResumeDetailEditModal({ resume, onClose, onSuccess }: Pr
                   取消
                 </button>
                 <button onClick={handleSave} disabled={saving}
-                  className="text-xs font-semibold py-1.5 px-3 rounded-xl bg-primary text-white hover:bg-primary-container transition cursor-pointer flex items-center gap-1 disabled:opacity-50">
+                  className="text-xs font-semibold py-1.5 px-3 rounded-xl bg-primary/10 text-primary hover:bg-primary/20 transition cursor-pointer flex items-center gap-1 disabled:opacity-50">
                   <Save className="w-3.5 h-3.5" /> {saving ? "保存中..." : "保存"}
                 </button>
               </>

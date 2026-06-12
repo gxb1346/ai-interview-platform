@@ -155,7 +155,7 @@ export default function ResumeManageView() {
   return (
     <div className="space-y-6">
       {/* 头部 */}
-      <div className="bg-white/70 backdrop-blur-md p-5 rounded-2xl border border-white/40 shadow-sm">
+      <div className="bg-white/70 backdrop-blur-md p-5 rounded-2xl border border-slate-200 shadow-sm">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
@@ -183,7 +183,7 @@ export default function ResumeManageView() {
               />
             </div>
             <button onClick={handleSearch}
-              className="text-xs bg-primary text-white font-semibold py-2 px-4 rounded-xl hover:bg-primary-container transition cursor-pointer">
+              className="text-xs bg-primary/10 text-primary font-bold border border-primary/30 py-2 px-4 rounded-xl hover:bg-primary/20 transition cursor-pointer">
               搜索
             </button>
             <button onClick={() => setShowFilters(!showFilters)}
@@ -245,7 +245,7 @@ export default function ResumeManageView() {
       )}
 
       {/* 列表 */}
-      <div className="bg-white/80 backdrop-blur-md rounded-2xl border border-white/40 shadow-sm overflow-hidden">
+      <div className="bg-white/80 backdrop-blur-md rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         {loading && !data ? (
           <div className="p-12 text-center text-sm text-slate-400">加载中...</div>
         ) : data && data.list.length === 0 ? (
@@ -357,7 +357,7 @@ export default function ResumeManageView() {
                 return (
                   <button key={p} onClick={() => setPage(p)}
                     className={`min-w-[32px] h-8 text-xs font-semibold rounded-lg transition cursor-pointer ${
-                      p === page ? "bg-primary text-white" : "text-slate-600 hover:bg-slate-100"
+                      p === page ? "bg-primary/10 text-primary font-bold" : "text-slate-600 hover:bg-slate-100"
                     }`}>
                     {p + 1}
                   </button>
@@ -397,7 +397,7 @@ export default function ResumeManageView() {
                 取消
               </button>
               <button onClick={handleDelete} disabled={deleting}
-                className="text-xs font-semibold py-2 px-4 rounded-xl bg-red-500 hover:bg-red-600 text-white transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5">
+                className="text-xs font-semibold py-2 px-4 rounded-xl bg-red-500 hover:bg-red-600 text-white-pure transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5">
                 {deleting ? "删除中..." : "确认删除"}
               </button>
             </div>

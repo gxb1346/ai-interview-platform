@@ -1,6 +1,37 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Sparkles, Play, Calendar, ClipboardCheck, ArrowRight, BookOpen, Clock, Loader2, Plus, AlertCircle, Trash } from "lucide-react";
-import { Candidate, Interview } from "../types";
+import { Candidate, Interview, ResumeVO, ApiResult } from "../types";
+
+const API_BASE = "http://localhost:8082";
+
+function toCandidate(cand: ResumeVO): Candidate {
+  return {
+    id: "cand_" + cand.id,
+    name: cand.candidateName || "未知",
+    role: cand.candidateRole || "",
+    experienceYears: cand.experienceYears || 0,
+    education: cand.education || "未知",
+    status: cand.talentStatus as any,
+    avatar: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&h=150&fit=crop&crop=face",
+    matchScore: cand.matchScore || 0,
+    email: cand.email || "",
+    phone: cand.phone || "",
+    competencies: cand.competencies
+      ? {
+          technical: cand.competencies.technical ?? 5,
+          communication: cand.competencies.communication ?? 5,
+          problemSolving: cand.competencies.problemSolving ?? 5,
+          teamFit: cand.competencies.teamFit ?? 5,
+          drive: cand.competencies.drive ?? 5,
+        }
+      : { technical: 5, communication: 5, problemSolving: 5, teamFit: 5, drive: 5 },
+    strengths: cand.strengths || [],
+    weaknesses: cand.weaknesses || [],
+    highlights: cand.highlights || [],
+    aiSummary: cand.aiSummary || "",
+    analyzedAt: cand.analyzedAt || ""
+  };
+}
 
 interface InterviewCenterViewProps {
   interviews: Interview[];
@@ -22,15 +53,42 @@ export default function InterviewCenterView({
   const [notes, setNotes] = useState("");
   const [generatingQuestionsId, setGeneratingQuestionsId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  // 删除确认
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Suggested questions state mapped by Interview ID
   const [suggestedQuestionsList, setSuggestedQuestionsList] = useState<Record<string, string[]>>({});
+  // 人才库候选人（从后端 API 拉取）
+  const [talentCandidates, setTalentCandidates] = useState<Candidate[]>([]);
+
+  // 组件挂载时从后端拉取人才库候选人
+  useEffect(() => {
+    fetch(`${API_BASE}/api/resume/talent-pool`)
+      .then(res => res.json())
+      .then((json: ApiResult<ResumeVO[]>) => {
+        if (json.code === 200 && json.data) {
+          setTalentCandidates(json.data.map(toCandidate));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // 合并预植入候选人 + 人才库候选人（按 id 去重）
+  const allCandidates = React.useMemo(() => {
+    const merged = [...candidates];
+    talentCandidates.forEach(tc => {
+      if (!merged.some(c => c.id === tc.id)) {
+        merged.push(tc);
+      }
+    });
+    return merged;
+  }, [candidates, talentCandidates]);
 
   const handleCreateInterview = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCandidateId || !scheduledAt) return;
 
-    const candidate = candidates.find((c) => c.id === selectedCandidateId);
+    const candidate = allCandidates.find((c) => c.id === selectedCandidateId);
     if (!candidate) return;
 
     const newInt: Interview = {
@@ -56,7 +114,7 @@ export default function InterviewCenterView({
 
   const handleGenerateAIQuestions = async (int: Interview) => {
     setGeneratingQuestionsId(int.id);
-    const candidate = candidates.find((c) => c.id === int.candidateId);
+    const candidate = allCandidates.find((c) => c.id === int.candidateId);
     
     try {
       const response = await fetch("/api/interview/suggest-questions", {
@@ -97,7 +155,7 @@ export default function InterviewCenterView({
     }
   };
 
-  const activeCandidate = candidates.find(c => c.id === selectedCandidateId);
+  const activeCandidate = allCandidates.find(c => c.id === selectedCandidateId);
 
   return (
     <div className="space-y-6" id="interview-center-container">
@@ -114,7 +172,7 @@ export default function InterviewCenterView({
 
         <button
           onClick={() => setShowAddForm(!showAddForm)}
-          className="font-sans text-xs font-semibold text-white bg-primary hover:bg-primary-container px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-primary/10"
+          className="font-sans text-xs font-semibold text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20 px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
         >
           <Plus className="w-4 h-4" />
           安排新面试日程
@@ -139,7 +197,7 @@ export default function InterviewCenterView({
                 className="w-full text-xs py-2.5 px-3 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 outline-none transition font-sans cursor-pointer"
               >
                 <option value="">- 请选择候选人 -</option>
-                {candidates.map((cand) => (
+                {allCandidates.map((cand) => (
                   <option key={cand.id} value={cand.id}>
                     {cand.name} - {cand.role}
                   </option>
@@ -180,7 +238,7 @@ export default function InterviewCenterView({
             </button>
             <button
               type="submit"
-              className="font-sans text-xs font-semibold text-white bg-primary hover:bg-primary-container py-2 px-5 rounded-xl transition cursor-pointer"
+              className="font-sans text-xs font-semibold text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20 py-2 px-5 rounded-xl transition cursor-pointer"
             >
               确定安排
             </button>
@@ -193,14 +251,14 @@ export default function InterviewCenterView({
         
         {/* Scheduled List Panel (Col-7) */}
         <div className="lg:col-span-12 space-y-4">
-          <div className="bg-white/70 backdrop-blur-md p-5 rounded-2xl border border-white/40 shadow-sm">
+          <div className="bg-white/70 backdrop-blur-md p-5 rounded-2xl border border-slate-200 shadow-sm">
             <h3 className="text-sm font-bold text-slate-800 font-sans mb-4 border-b border-slate-100 pb-3 flex items-center gap-1.5">
               <ClipboardCheck className="w-4.5 h-4.5 text-primary" /> 日程计划一览 ({interviews.length} 场场安排)
             </h3>
 
             <div className="space-y-4">
               {interviews.map((int) => {
-                const targetCand = candidates.find(c => c.id === int.candidateId);
+                const targetCand = allCandidates.find(c => c.id === int.candidateId);
                 const hasAIGenQuestions = suggestedQuestionsList[int.id] && suggestedQuestionsList[int.id].length > 0;
 
                 return (
@@ -281,14 +339,14 @@ export default function InterviewCenterView({
                             alert("档案库中不支持直接模拟其测试。");
                           }
                         }}
-                        className="flex-1 font-sans text-xs text-white bg-primary hover:bg-primary-container font-semibold py-2.5 px-4 rounded-xl transition flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                        className="flex-1 font-sans text-xs text-primary bg-primary/10 hover:bg-primary/20 font-semibold py-2.5 px-4 rounded-xl transition flex items-center justify-center gap-1 shadow-sm cursor-pointer border border-primary/20"
                       >
-                        <Play className="w-3 h-3 fill-white" />
+                        <Play className="w-3 h-3" />
                         开启模拟面试
                       </button>
 
                       <button
-                        onClick={() => onRemoveInterview(int.id)}
+                        onClick={() => setDeleteConfirmId(int.id)}
                         className="font-sans text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-50 font-semibold py-2 px-3 rounded-xl transition border border-rose-100 flex items-center justify-center gap-1 cursor-pointer"
                       >
                         <Trash className="w-3.5 h-3.5" />
@@ -310,6 +368,33 @@ export default function InterviewCenterView({
           </div>
         </div>
       </div>
+
+      {/* 删除确认弹窗 */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl p-6 mx-4 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-red-500" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800 font-sans">确认删除日程</h3>
+                <p className="text-xs text-slate-500 font-sans">删除后不可恢复，确定要删除该面试安排吗？</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setDeleteConfirmId(null)}
+                className="text-xs font-semibold py-2 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer">
+                取消
+              </button>
+              <button onClick={() => { onRemoveInterview(deleteConfirmId); setDeleteConfirmId(null); }}
+                className="text-xs font-semibold py-2 px-4 rounded-xl bg-red-500 hover:bg-red-600 text-white-pure transition cursor-pointer flex items-center gap-1.5">
+                <Trash className="w-3.5 h-3.5" /> 确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
