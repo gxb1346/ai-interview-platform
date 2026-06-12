@@ -1,6 +1,8 @@
 package com.interview.modules.resume.controller;
 
+import com.interview.common.result.PageResult;
 import com.interview.common.result.Result;
+import com.interview.modules.resume.model.ResumeUpdateDTO;
 import com.interview.modules.resume.model.ResumeVO;
 import com.interview.modules.resume.service.ResumeService;
 import org.springframework.http.MediaType;
@@ -8,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 简历分析 REST 控制器
@@ -27,10 +30,6 @@ public class ResumeController {
 
     /**
      * 上传并分析简历
-     *
-     * @param file      简历文件 (PDF / DOCX / TXT)
-     * @param targetJob 目标岗位 (可选)
-     * @return 结构化分析结果
      */
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Result<ResumeVO> uploadAndAnalyze(
@@ -52,11 +51,59 @@ public class ResumeController {
     }
 
     /**
+     * 分页查询简历列表（支持搜索、筛选）
+     */
+    @GetMapping("/page")
+    public Result<PageResult<ResumeVO>> page(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String education,
+            @RequestParam(required = false) Integer minScore,
+            @RequestParam(required = false) Integer maxScore) {
+        PageResult<ResumeVO> result = resumeService.getResumePage(keyword, education, minScore, maxScore, page, pageSize);
+        return Result.success(result);
+    }
+
+    /**
      * 获取所有简历分析记录
      */
     @GetMapping("/list")
     public Result<List<ResumeVO>> listAll() {
         return Result.success(resumeService.getAllResumes());
+    }
+
+    /**
+     * 获取人才库候选人列表
+     */
+    @GetMapping("/talent-pool")
+    public Result<List<ResumeVO>> getTalentPool() {
+        return Result.success(resumeService.getTalentPool());
+    }
+
+    /**
+     * 移入人才库
+     */
+    @PostMapping("/{id}/to-talent-pool")
+    public Result<ResumeVO> moveToTalentPool(@PathVariable Long id) {
+        try {
+            return Result.success(resumeService.moveToTalentPool(id));
+        } catch (Exception e) {
+            return Result.error(e.getMessage());
+        }
+    }
+
+    /**
+     * 更新人才库状态
+     */
+    @PutMapping("/{id}/talent-status")
+    public Result<ResumeVO> updateTalentStatus(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        try {
+            String status = body.get("talentStatus");
+            return Result.success(resumeService.updateTalentStatus(id, status));
+        } catch (Exception e) {
+            return Result.error(e.getMessage());
+        }
     }
 
     /**
@@ -68,6 +115,45 @@ public class ResumeController {
             return Result.success(resumeService.getResumeById(id));
         } catch (Exception e) {
             return Result.error(e.getMessage());
+        }
+    }
+
+    /**
+     * 手动修正 AI 解析结果
+     */
+    @PutMapping("/{id}")
+    public Result<ResumeVO> update(@PathVariable Long id, @RequestBody ResumeUpdateDTO dto) {
+        try {
+            ResumeVO vo = resumeService.updateResume(id, dto);
+            return Result.success(vo);
+        } catch (Exception e) {
+            return Result.error("更新失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 软删除简历
+     */
+    @DeleteMapping("/{id}/soft")
+    public Result<Void> softDelete(@PathVariable Long id) {
+        try {
+            resumeService.softDelete(id);
+            return Result.success(null);
+        } catch (Exception e) {
+            return Result.error("删除失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 硬删除简历
+     */
+    @DeleteMapping("/{id}/hard")
+    public Result<Void> hardDelete(@PathVariable Long id) {
+        try {
+            resumeService.hardDelete(id);
+            return Result.success(null);
+        } catch (Exception e) {
+            return Result.error("删除失败: " + e.getMessage());
         }
     }
 }

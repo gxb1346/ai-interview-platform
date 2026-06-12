@@ -12,14 +12,14 @@ import {
   History,
   Calendar,
   Sparkles,
-  Search,
   Bell,
   Menu,
   ChevronDown,
   LogOut,
   BrainCircuit,
   MessageSquare,
-  Video
+  Video,
+  ClipboardList
 } from "lucide-react";
 
 import { Candidate, CandidateStatus, Interview, ScoreCard } from "./types";
@@ -32,9 +32,11 @@ import InterviewCenterView from "./components/InterviewCenterView";
 import MockInterviewView from "./components/MockInterviewView";
 import InterviewRecordsView from "./components/InterviewRecordsView";
 import ScheduleView from "./components/ScheduleView";
+import ResumeManageView from "./components/ResumeManageView";
 
 type ActiveView =
   | "RESUME_ANALYSIS"
+  | "RESUME_MANAGE"
   | "TALENT_POOL"
   | "INTERVIEW_CENTER"
   | "MOCK_INTERVIEW"
@@ -51,9 +53,6 @@ export default function App() {
   const [preSelectedCandidate, setPreSelectedCandidate] = useState<Candidate | null>(null);
 
   // Search input matching local list
-  const [globalSearchTerm, setGlobalSearchTerm] = useState("");
-
-  // Sidebar toggle state on mobile devices
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Add Candidate to list
@@ -108,6 +107,8 @@ export default function App() {
     switch (currentView) {
       case "RESUME_ANALYSIS":
         return "简历分析";
+      case "RESUME_MANAGE":
+        return "简历管理";
       case "TALENT_POOL":
         return "人才库评估";
       case "INTERVIEW_CENTER":
@@ -154,6 +155,7 @@ export default function App() {
             <nav className="space-y-1.5 pt-2">
               {[
                 { id: "RESUME_ANALYSIS", label: "简历分析", icon: FileText },
+                { id: "RESUME_MANAGE", label: "简历管理", icon: ClipboardList },
                 { id: "TALENT_POOL", label: "人才库", icon: Users },
                 { id: "INTERVIEW_CENTER", label: "面试中心", icon: Video },
                 { id: "MOCK_INTERVIEW", label: "模拟面试", icon: MessageSquareCode },
@@ -231,24 +233,6 @@ export default function App() {
               </h2>
             </div>
 
-            {/* Middle search bar matching local list search constraints */}
-            <div className="relative max-w-sm w-full hidden sm:block">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                value={globalSearchTerm}
-                onChange={(e) => {
-                  setGlobalSearchTerm(e.target.value);
-                  // Dynamic keyword forwarding directly to search panels
-                  if (currentView !== "TALENT_POOL" && currentView !== "INTERVIEW_RECORDS") {
-                    setCurrentView("TALENT_POOL");
-                  }
-                }}
-                placeholder="智搜简历人才、岗位关键词..."
-                className="w-full text-xs pl-10 pr-4 py-2 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 focus:border-primary outline-none transition font-sans"
-              />
-            </div>
-
             {/* Right section icons and profile notifications */}
             <div className="flex items-center gap-3">
               <div className="relative cursor-pointer hover:scale-105 transition">
@@ -282,10 +266,12 @@ export default function App() {
               />
             )}
 
+            {currentView === "RESUME_MANAGE" && (
+              <ResumeManageView />
+            )}
+
             {currentView === "TALENT_POOL" && (
               <TalentPoolView
-                candidates={candidates}
-                onSelectCandidate={handleNavigateToMock}
                 onNavigateToMock={handleNavigateToMock}
                 onNavigateToInterview={handleNavigateToInterview}
               />

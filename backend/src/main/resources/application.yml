@@ -42,7 +42,7 @@ spring:
       api-key: ${AI_API_KEY}
       chat:
         options:
-          model: ${AI_MODEL:qwen3.5-flash}
+          model: ${AI_MODEL:qwen-turbo}
       embedding:
         options:
           model: text-embedding-v3
@@ -51,15 +51,15 @@ spring:
   # Redis 配置
   data:
     redis:
-      host: 127.0.0.1
+      host: ::1
       port: 6379
-      timeout: 3000ms
-      connect-timeout: 3000ms
+      timeout: 10000ms
+      connect-timeout: 10000ms
+      lettuce:
+        pool:
+          enabled: false
 
-  # 排除 Redisson 自动配置（使用 Spring Data Redis / Lettuce）
-  autoconfigure:
-    exclude:
-      - org.redisson.spring.starter.RedissonAutoConfigurationV4
+  # 使用 Lettuce 客户端（已移除 Redisson 依赖）
 
   # pgvector配置
   vectorstore:

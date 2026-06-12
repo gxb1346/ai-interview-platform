@@ -35,6 +35,15 @@ public class ResumeVO {
     private String aiSummary;
     private String analyzedAt;
 
+    /** 创建时间 */
+    private String createdAt;
+
+    /** 是否在人才库中 */
+    private Boolean inTalentPool = false;
+
+    /** 人才库状态 */
+    private String talentStatus = "NEW";
+
     private Map<String, Integer> competencies;
     private List<String> strengths;
     private List<String> weaknesses;
@@ -60,6 +69,11 @@ public class ResumeVO {
         vo.setAnalyzedAt(entity.getAnalyzedAt() != null
                 ? entity.getAnalyzedAt().toString().replace("T", " ").substring(0, 16)
                 : "");
+        vo.setCreatedAt(entity.getCreatedAt() != null
+                ? entity.getCreatedAt().toString().replace("T", " ").substring(0, 16)
+                : "");
+        vo.setInTalentPool(entity.getInTalentPool());
+        vo.setTalentStatus(entity.getTalentStatus() != null ? entity.getTalentStatus().name() : "NEW");
 
         // 解析 JSONB 字段
         try {

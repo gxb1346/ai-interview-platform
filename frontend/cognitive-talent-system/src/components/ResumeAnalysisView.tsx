@@ -152,6 +152,11 @@ export default function ResumeAnalysisView({
         analyzedAt: data.analyzedAt || new Date().toISOString().replace("T", " ").substring(0, 16),
       };
 
+      // 自动将新简历移入人才库
+      if (data.id) {
+        fetch(`${API_BASE}/api/resume/${data.id}/to-talent-pool`, { method: "POST" }).catch(() => {});
+      }
+
       // 延迟展示，让进度条走完
       setTimeout(() => {
         setAnalyzedCandidate(newCand);

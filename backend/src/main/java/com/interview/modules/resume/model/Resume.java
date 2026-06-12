@@ -9,6 +9,8 @@ import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 
+import com.interview.modules.resume.model.TalentStatus;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -91,6 +93,19 @@ public class Resume {
 
     /** AI 分析完成时间 */
     private LocalDateTime analyzedAt;
+
+    /** 软删除标记 */
+    @Column(columnDefinition = "boolean default false")
+    private Boolean deleted = false;
+
+    /** 是否已移入人才库 */
+    @Column(columnDefinition = "boolean default false")
+    private Boolean inTalentPool = false;
+
+    /** 人才库管道状态 */
+    @Enumerated(EnumType.STRING)
+    @Column(columnDefinition = "varchar(255) default 'NEW'")
+    private TalentStatus talentStatus = TalentStatus.NEW;
 
     @PrePersist
     protected void onCreate() {
