@@ -1,15 +1,17 @@
 import React, { useState } from "react";
-import { Search, Trophy, ShieldCheck, HelpCircle, X, Clock, Award, Star, AlertTriangle, FileSpreadsheet } from "lucide-react";
+import { Search, Trophy, ShieldCheck, HelpCircle, X, Clock, Award, Star, AlertTriangle, FileSpreadsheet, Trash2 } from "lucide-react";
 import { ScoreCard } from "../types";
 
 interface InterviewRecordsViewProps {
   scoreCards: ScoreCard[];
+  onDeleteScoreCard: (cardId: string) => void;
 }
 
-export default function InterviewRecordsView({ scoreCards }: InterviewRecordsViewProps) {
+export default function InterviewRecordsView({ scoreCards, onDeleteScoreCard }: InterviewRecordsViewProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedVerdict, setSelectedVerdict] = useState<string>("ALL");
   const [activeCard, setActiveCard] = useState<ScoreCard | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Filter history records based on search and verdict tag selection
   const filteredRecords = scoreCards.filter((card) => {
@@ -263,12 +265,24 @@ export default function InterviewRecordsView({ scoreCards }: InterviewRecordsVie
             </div>
 
             {/* Footer triggers */}
-            <div className="border-t border-slate-100 pt-4 flex items-center justify-end">
+            <div className="border-t border-slate-100 pt-4 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  if (window.confirm("确定删除该面试记录？删除后不可恢复。")) {
+                    onDeleteScoreCard(activeCard.id);
+                    setActiveCard(null);
+                  }
+                }}
+                className="font-sans text-xs bg-red-50 text-red-600 hover:bg-red-100 font-semibold py-2 px-4 rounded-lg transition border border-red-200 cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                删除记录
+              </button>
               <button
                 onClick={() => setActiveCard(null)}
                 className="font-sans text-xs bg-primary/10 text-primary font-bold hover:bg-primary/20 py-2 px-5 rounded-lg transition shadow-sm border border-primary cursor-pointer"
               >
-                确定确定，关闭档案
+                关闭档案
               </button>
             </div>
           </div>

@@ -21,7 +21,9 @@ import {
   ClipboardList
 } from "lucide-react";
 
-import { Candidate, CandidateStatus, Interview, ScoreCard } from "./types";
+const API_BASE = "http://localhost:8082";
+
+import { Candidate, CandidateStatus, Interview, ScoreCard, InterviewSession } from "./types";
 import { PRESEEDED_CANDIDATES, PRESEEDED_INTERVIEWS, PRESEEDED_SCORECARDS } from "./data";
 
 // Sub-views
@@ -71,6 +73,8 @@ export default function App() {
     () => loadFromStorage("recruit_scorecards", PRESEEDED_SCORECARDS)
   );
   const [preSelectedCandidate, setPreSelectedCandidate] = useState<Candidate | null>(null);
+  const [interviewSessions, setInterviewSessions] = useState<InterviewSession[]>([]);
+  const [resumeSessionId, setResumeSessionId] = useState<string | null>(null);
 
   // Search input matching local list
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -117,7 +121,46 @@ export default function App() {
     );
   };
 
-  const handleNavigateToMock = (cand: Candidate) => {
+  // Delete score evaluation scorecard
+  const handleDeleteScoreCard = (cardId: string) => {
+    setScoreCards((prev) => prev.filter((c) => c.id !== cardId));
+  };
+
+  // 从后端拉取面试会话列表
+  const refreshInterviewSessions = async () => {
+    try {
+      // 从候选人列表中拉取会话
+      const candidateIds = [...new Set(candidates.map(c => c.id))];
+      const allSessions: InterviewSession[] = [];
+      for (const cId of candidateIds.slice(0, 20)) { // 限制最多查询20个候选人
+        try {
+          const res = await fetch(`${API_BASE}/api/mock-interview/candidates/${cId}/sessions`);
+          const sessions = await res.json();
+          if (Array.isArray(sessions)) allSessions.push(...sessions);
+        } catch {}
+      }
+      // 去重
+      const seen = new Set<string>();
+      const unique = allSessions.filter(s => {
+        if (seen.has(s.sessionId)) return false;
+        seen.add(s.sessionId);
+        return true;
+      });
+      if (unique.length > 0) setInterviewSessions(unique);
+    } catch {}
+  };
+
+  const onSessionCreated = (sessionId: string) => {
+    // 新会话创建后，延迟拉取最新状态
+    setTimeout(refreshInterviewSessions, 100);
+  };
+
+  // 组件挂载时拉取会话列表
+  useEffect(() => { refreshInterviewSessions(); }, []);
+
+  const handleNavigateToMock = (cand: Candidate, sessionId?: string) => {
+    if (sessionId) setResumeSessionId(sessionId);
+    else setResumeSessionId(null);
     setPreSelectedCandidate(cand);
     setCurrentView("MOCK_INTERVIEW");
     // 同步候选人到全局列表，确保模拟面试页面可选
@@ -318,6 +361,12 @@ export default function App() {
                 onAddInterview={handleAddInterview}
                 onRemoveInterview={handleRemoveInterview}
                 onNavigateToMock={handleNavigateToMock}
+                onNavigateToRecords={() => {
+                  setPreSelectedCandidate(null);
+                  setCurrentView("INTERVIEW_RECORDS");
+                }}
+                interviewSessions={interviewSessions}
+                onRefreshSessions={refreshInterviewSessions}
               />
             )}
 
@@ -325,16 +374,18 @@ export default function App() {
               <MockInterviewView
                 candidates={candidates}
                 preSelectedCandidate={preSelectedCandidate}
+                resumeSessionId={resumeSessionId}
                 onSaveScoreCard={handleSaveScoreCard}
                 onNavigateToRecords={() => {
                   setPreSelectedCandidate(null);
                   setCurrentView("INTERVIEW_RECORDS");
                 }}
+                onSessionCreated={onSessionCreated}
               />
             )}
 
             {currentView === "INTERVIEW_RECORDS" && (
-              <InterviewRecordsView scoreCards={scoreCards} />
+              <InterviewRecordsView scoreCards={scoreCards} onDeleteScoreCard={handleDeleteScoreCard} />
             )}
 
             {currentView === "SCHEDULE" && (

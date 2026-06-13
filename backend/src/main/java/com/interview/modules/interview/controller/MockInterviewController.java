@@ -1,0 +1,147 @@
+package com.interview.modules.interview.controller;
+
+import com.interview.modules.interview.model.InterviewSession;
+import com.interview.modules.interview.service.MockInterviewService;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 模拟面试 REST API 控制器
+ * 文字面试使用 REST，语音面试使用 WebSocket
+ */
+@RestController
+@RequestMapping("/api/mock-interview")
+public class MockInterviewController {
+
+    private final MockInterviewService interviewService;
+
+    public MockInterviewController(MockInterviewService interviewService) {
+        this.interviewService = interviewService;
+    }
+
+    /**
+     * 创建面试会话
+     */
+    @PostMapping("/sessions")
+    public ResponseEntity<Map<String, Object>> createSession(@RequestBody MockInterviewService.CreateSessionRequest request) {
+        InterviewSession session = interviewService.createSession(request);
+        return ResponseEntity.ok(Map.of(
+                "sessionId", session.getSessionId(),
+                "status", session.getStatus(),
+                "stageConfig", session.getStageConfig()
+        ));
+    }
+
+    /**
+     * 开始面试（生成题目）
+     */
+    @PostMapping("/sessions/{sessionId}/start")
+    public ResponseEntity<Map<String, Object>> startInterview(@PathVariable String sessionId) {
+        InterviewSession session = interviewService.startInterview(sessionId);
+        Map<String, Object> response = new HashMap<>();
+        response.put("sessionId", session.getSessionId());
+        response.put("status", session.getStatus());
+        response.put("questions", session.getQuestions().stream().map(q -> Map.of(
+                "id", q.getId(),
+                "text", q.getText(),
+                "category", q.getCategory(),
+                "difficultyScore", q.getDifficultyScore(),
+                "source", q.getSource()
+        )).toList());
+        response.put("currentStage", session.getCurrentStage());
+        response.put("messages", session.getMessages());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 提交回答并获取回复
+     */
+    @PostMapping("/sessions/{sessionId}/chat")
+    public ResponseEntity<Map<String, Object>> chat(@PathVariable String sessionId,
+                                                     @RequestBody Map<String, String> body) {
+        String answer = body.get("answer");
+        InterviewSession session = interviewService.processAnswer(sessionId, answer);
+
+        var messages = session.getMessages();
+        var lastMessage = messages.get(messages.size() - 1);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("reply", lastMessage.getText());
+        response.put("currentRound", session.getCurrentRound());
+        response.put("currentStage", session.getCurrentStage());
+        response.put("status", session.getStatus());
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 结束面试
+     */
+    @PostMapping("/sessions/{sessionId}/end")
+    public ResponseEntity<Map<String, String>> endInterview(@PathVariable String sessionId) {
+        InterviewSession session = interviewService.endInterview(sessionId);
+        return ResponseEntity.ok(Map.of(
+                "sessionId", session.getSessionId(),
+                "status", session.getStatus()
+        ));
+    }
+
+    /**
+     * 获取面试会话详情
+     */
+    @GetMapping("/sessions/{sessionId}")
+    public ResponseEntity<InterviewSession> getSession(@PathVariable String sessionId) {
+        return interviewService.getSession(sessionId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
+     * 获取候选人所有历史面试
+     */
+    @GetMapping("/candidates/{candidateId}/sessions")
+    public ResponseEntity<List<InterviewSession>> getCandidateSessions(@PathVariable String candidateId) {
+        return ResponseEntity.ok(interviewService.getCandidateSessions(candidateId));
+    }
+
+    /**
+     * 获取所有面试方向
+     */
+    @GetMapping("/directions")
+    public ResponseEntity<List<String>> getAllDirections() {
+        return ResponseEntity.ok(com.interview.modules.interview.model.InterviewDirection.getDisplayNames());
+    }
+
+    /**
+     * 推荐面试方向（基于简历）
+     */
+    @PostMapping("/directions/recommend")
+    public ResponseEntity<List<Map<String, Object>>> recommendDirections(@RequestBody Map<String, String> body) {
+        String resumeText = body.get("resumeText");
+        var recommendations = interviewService.recommendDirections(resumeText);
+        return ResponseEntity.ok(recommendations.stream().map(r -> Map.<String, Object>of(
+                "direction", r.getDirection(),
+                "matchScore", r.getMatchScore(),
+                "reason", r.getReason()
+        )).toList());
+    }
+
+    /**
+     * 解析 JD 文本
+     */
+    @PostMapping("/jd/parse")
+    public ResponseEntity<Map<String, Object>> parseJD(@RequestBody Map<String, String> body) {
+        String jdText = body.get("jdText");
+        var result = interviewService.parseJD(jdText);
+        return ResponseEntity.ok(Map.of(
+                "matchedDirection", result.getMatchedDirection(),
+                "skills", result.getSkills(),
+                "experienceRequired", result.getExperienceRequired(),
+                "techStack", result.getTechStack()
+        ));
+    }
+}

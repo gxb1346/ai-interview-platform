@@ -19,11 +19,11 @@ export enum TalentStatus {
 }
 
 export interface CompetencyScores {
-  technical: number;      // 技术深度
-  communication: number;  // 沟通表达
-  problemSolving: number; // 解决问题
-  teamFit: number;        // 团队契合
-  drive: number;          // 自驱动力
+  technical: number;
+  communication: number;
+  problemSolving: number;
+  teamFit: number;
+  drive: number;
 }
 
 export interface Candidate {
@@ -34,7 +34,7 @@ export interface Candidate {
   education: string;
   status: CandidateStatus;
   avatar: string;
-  matchScore: number;     // AI 匹配度 %
+  matchScore: number;
   email: string;
   phone: string;
   resumeText?: string;
@@ -47,7 +47,7 @@ export interface Candidate {
   createdAt?: string;
 }
 
-/** 后端 ResumeVO 类型（与 API 返回一致） */
+/** 后端 ResumeVO 类型 */
 export interface ResumeVO {
   id: number;
   fileName: string;
@@ -108,7 +108,7 @@ export interface Interview {
   candidateId: string;
   candidateName: string;
   role: string;
-  scheduledAt: string; // e.g. "2026-06-11 10:00"
+  scheduledAt: string;
   status: "pending" | "completed" | "cancelled";
   suggestedQuestions: string[];
   notes?: string;
@@ -139,3 +139,145 @@ export interface ScoreCard {
   verdict: "建议录用" | "待定" | "不予录用";
   evaluatedAt: string;
 }
+
+/* ===== 模拟面试系统新增类型 ===== */
+
+/** 面试阶段配置 */
+export interface StageConfig {
+  totalMinutes: number;
+  stageMinutes: Record<string, number>;
+}
+
+/** 面试题目 */
+export interface InterviewQuestion {
+  id: string;
+  text: string;
+  source: "SKILL" | "RESUME_DEEP_DIVE" | "JD_PARSE";
+  direction: string;
+  level: string;
+  stage: string;
+  category: string;
+  difficultyScore: number;
+}
+
+/** 面试对话消息（后端格式） */
+export interface InterviewMessage {
+  id: string;
+  sender: "interviewer" | "candidate";
+  text: string;
+  stage: string;
+  roundNumber: number;
+  timestamp: string;
+}
+
+/** 面试会话（从后端获取） */
+export interface InterviewSession {
+  sessionId: string;
+  candidateId: string;
+  candidateName: string;
+  candidateRole: string;
+  resumeText: string;
+  direction: string;
+  level: string;
+  mode: "text" | "voice";
+  totalDuration: number;
+  stageConfig: StageConfig;
+  followUpCount: number;
+  status: "PREPARING" | "IN_PROGRESS" | "COMPLETED" | "TERMINATED";
+  customJD: string;
+  questions: InterviewQuestion[];
+  messages: InterviewMessage[];
+  askedQuestionIds: string[];
+  currentStage: string;
+  currentRound: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+/** 创建会话请求 */
+export interface CreateSessionRequest {
+  candidateId: string;
+  candidateName: string;
+  candidateRole: string;
+  resumeText?: string;
+  direction: string;
+  level: string;
+  mode: "text" | "voice";
+  totalDuration: number;
+  followUpCount: number;
+  customJD?: string;
+}
+
+/** 创建会话响应 */
+export interface CreateSessionResponse {
+  sessionId: string;
+  status: string;
+  stageConfig: StageConfig;
+}
+
+/** 开始面试响应 */
+export interface StartInterviewResponse {
+  sessionId: string;
+  status: string;
+  questions: {
+    id: string;
+    text: string;
+    category: string;
+    difficultyScore: number;
+    source: string;
+  }[];
+  currentStage: string;
+  messages: InterviewMessage[];
+}
+
+/** 聊天响应 */
+export interface ChatResponse {
+  reply: string;
+  currentRound: number;
+  currentStage: string;
+  status: string;
+}
+
+/** 方向推荐结果 */
+export interface DirectionRecommendation {
+  direction: string;
+  matchScore: number;
+  reason: string;
+}
+
+/** JD 解析结果 */
+export interface JDParseResult {
+  matchedDirection: string;
+  skills: string[];
+  experienceRequired: number;
+  techStack: string[];
+}
+
+/** 评估报告 */
+export interface EvaluationReport {
+  reportId: string;
+  sessionId: string;
+  candidateId: string;
+  candidateName: string;
+  direction: string;
+  level: string;
+  totalRounds: number;
+  overallScore: number;
+  dimensionScores: Record<string, number>;
+  strengths: string[];
+  improvements: string[];
+  summary: string;
+  verdict: string;
+  mode: string;
+  evaluatedAt: string;
+  pdfReportPath: string | null;
+}
+
+/** 阶段时长对应表 */
+export const STAGE_LABELS: Record<string, string> = {
+  selfIntro: "自我介绍",
+  techExam: "技术考察",
+  projectDeep: "项目深挖",
+  qaRound: "反问环节"
+};

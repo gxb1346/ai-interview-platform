@@ -320,7 +320,7 @@ export default function ResumeManageView() {
                           title="查看/编辑">
                           <Eye className="w-4 h-4" />
                         </button>
-                        <button onClick={() => { setDeleteTarget(item); setDeleteMode("soft"); }}
+                        <button onClick={() => { setDeleteTarget(item); }}
                           className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition cursor-pointer"
                           title="删除">
                           <Trash2 className="w-4 h-4" />
