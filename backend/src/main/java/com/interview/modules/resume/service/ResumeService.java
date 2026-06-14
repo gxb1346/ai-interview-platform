@@ -21,6 +21,7 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
+import jakarta.annotation.PostConstruct;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -81,11 +82,20 @@ public class ResumeService {
         // 2. Tika 解析 → 提取纯文本
         String rawText = tikaService.extractText(file);
 
-        // 3. 计算内容哈希，尝试查 Redis 缓存（Redis不可用时降级）
+        // 3. 计算内容哈希，用于去重
+        String contentHash = md5(rawText);
+
+        // 4. 检查是否已经存在相同内容的简历（去重）
+        List<Resume> existing = resumeRepository.findByContentHashAndDeletedFalse(contentHash);
+        if (!existing.isEmpty()) {
+            // 已存在相同内容的简历，直接返回最早的那份
+            return ResumeVO.fromEntity(existing.get(0));
+        }
+
+        // 5. 查 Redis 缓存（Redis不可用时降级）
         String cachedJson = null;
         String cacheKey = null;
         try {
-            String contentHash = md5(rawText);
             cacheKey = buildCacheKey(contentHash, targetJob);
             cachedJson = redisTemplate.opsForValue().get(cacheKey);
         } catch (Exception e) {
@@ -97,7 +107,7 @@ public class ResumeService {
             try {
                 AnalysisResult result = objectMapper.readValue(cachedJson, AnalysisResult.class);
                 String s3Key = uploadToS3(file, fileType);
-                Resume saved = saveToDatabase(result, fileName, fileType, s3Key, file.getSize(), rawText);
+                Resume saved = saveToDatabase(result, fileName, fileType, s3Key, file.getSize(), rawText, contentHash);
                 return ResumeVO.fromEntity(saved);
             } catch (Exception e) {
                 // 缓存数据异常，忽略并重新分析
@@ -107,16 +117,16 @@ public class ResumeService {
             }
         }
 
-        // 4. 缓存未命中 → AI 分析
+        // 6. 缓存未命中 → AI 分析
         AnalysisResult result = analysisService.analyze(rawText, targetJob);
 
-        // 5. 上传原始文件到 MinIO/S3
+        // 7. 上传原始文件到 MinIO/S3
         String s3Key = uploadToS3(file, fileType);
 
-        // 6. 保存到数据库
-        Resume saved = saveToDatabase(result, fileName, fileType, s3Key, file.getSize(), rawText);
+        // 8. 保存到数据库
+        Resume saved = saveToDatabase(result, fileName, fileType, s3Key, file.getSize(), rawText, contentHash);
 
-        // 7. 尝试写入 Redis 缓存（失败不影响主流程）
+        // 9. 尝试写入 Redis 缓存（失败不影响主流程）
         if (cacheKey != null) {
             cacheResult(cacheKey, result);
         }
@@ -153,13 +163,14 @@ public class ResumeService {
     }
 
     private Resume saveToDatabase(AnalysisResult result, String fileName, String fileType,
-                                   String s3Key, Long fileSize, String rawText) {
+                                   String s3Key, Long fileSize, String rawText, String contentHash) {
         Resume resume = new Resume();
         resume.setFileName(fileName);
         resume.setFileType(fileType);
         resume.setS3Key(s3Key);
         resume.setFileSize(fileSize);
         resume.setRawText(rawText);
+        resume.setContentHash(contentHash);
 
         resume.setCandidateName(result.getName());
         resume.setCandidateRole(result.getRole());
@@ -208,11 +219,62 @@ public class ResumeService {
         }
     }
 
-    public List<ResumeVO> getAllResumes() {
-        return resumeRepository.findByDeletedFalseOrderByCreatedAtDesc()
-                .stream()
+    /**
+     * 启动时回填：为已有数据中 content_hash 为 NULL 的记录计算并填充
+     */
+    @PostConstruct
+    @Transactional
+    public void backfillContentHash() {
+        List<Resume> all = resumeRepository.findByDeletedFalseOrderByCreatedAtDesc();
+        int count = 0;
+        for (Resume r : all) {
+            if (r.getContentHash() == null || r.getContentHash().isBlank()) {
+                if (r.getRawText() != null && !r.getRawText().isBlank()) {
+                    r.setContentHash(md5(r.getRawText()));
+                    resumeRepository.save(r);
+                    count++;
+                }
+            }
+        }
+        if (count > 0) {
+            System.out.println("✅ 已回填 " + count + " 条简历记录的 content_hash");
+        }
+    }
+
+    /**
+     * 按 contentHash 去重：相同内容只保留最早创建的一份
+     * contentHash 为 null 的旧数据当作唯一记录保留 */
+    private List<ResumeVO> deduplicateByContent(List<Resume> resumes) {
+        // 分离有 hash 和没 hash 的记录
+        List<Resume> withHash = new java.util.ArrayList<>();
+        List<Resume> withoutHash = new java.util.ArrayList<>();
+        for (Resume r : resumes) {
+            if (r.getContentHash() != null && !r.getContentHash().isBlank()) {
+                withHash.add(r);
+            } else {
+                withoutHash.add(r);
+            }
+        }
+        // 有 hash 的按 contentHash 去重
+        List<ResumeVO> deduped = withHash.stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        Resume::getContentHash,
+                        r -> r,
+                        (r1, r2) -> r1.getCreatedAt().isBefore(r2.getCreatedAt()) ? r1 : r2
+                ))
+                .values().stream()
+                .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
                 .map(ResumeVO::fromEntity)
-                .collect(Collectors.toList());
+                .collect(java.util.stream.Collectors.toList());
+        // 没 hash 的当作唯一记录追加
+        withoutHash.stream()
+                .map(ResumeVO::fromEntity)
+                .forEach(deduped::add);
+        return deduped;
+    }
+
+    public List<ResumeVO> getAllResumes() {
+        return deduplicateByContent(resumeRepository.findByDeletedFalseOrderByCreatedAtDesc());
     }
 
     /**
@@ -234,9 +296,7 @@ public class ResumeService {
             resumePage = resumeRepository.findByDeletedFalseOrderByCreatedAtDesc(pageable);
         }
 
-        List<ResumeVO> voList = resumePage.getContent().stream()
-                .map(ResumeVO::fromEntity)
-                .collect(Collectors.toList());
+        List<ResumeVO> voList = deduplicateByContent(resumePage.getContent());
 
         return PageResult.of(voList, resumePage.getTotalElements(), page, pageSize);
     }
@@ -303,13 +363,10 @@ public class ResumeService {
     }
 
     /**
-     * 获取人才库候选人列表
+     * 获取人才库候选人列表（已去重）
      */
     public List<ResumeVO> getTalentPool() {
-        return resumeRepository.findByInTalentPoolTrueOrderByCreatedAtDesc()
-                .stream()
-                .map(ResumeVO::fromEntity)
-                .collect(Collectors.toList());
+        return deduplicateByContent(resumeRepository.findByInTalentPoolTrueAndDeletedFalseOrderByCreatedAtDesc());
     }
 
     /**
@@ -340,6 +397,19 @@ public class ResumeService {
         } catch (IllegalArgumentException e) {
             throw new RuntimeException("无效的人才库状态: " + status);
         }
+    }
+
+    /**
+     * 从人才库移除
+     */
+    @Transactional
+    public ResumeVO removeFromTalentPool(Long id) {
+        Resume resume = resumeRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("简历不存在: id=" + id));
+        resume.setInTalentPool(false);
+        resume.setTalentStatus(null);
+        Resume saved = resumeRepository.save(resume);
+        return ResumeVO.fromEntity(saved);
     }
 
     private String uploadToS3(MultipartFile file, String fileType) {

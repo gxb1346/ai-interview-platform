@@ -76,9 +76,15 @@ export default function InterviewCenterView({
   }, []);
 
   const allCandidates = React.useMemo(() => {
-    const merged = [...candidates];
-    talentCandidates.forEach(tc => { if (!merged.some(c => c.id === tc.id)) merged.push(tc); });
-    return merged;
+    // 合并 candidates + talentCandidates，并按姓名+岗位去重
+    const merged = [...candidates, ...talentCandidates];
+    const seen = new Set<string>();
+    return merged.filter(c => {
+      const key = `${c.name}|${c.role}|${c.matchScore}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [candidates, talentCandidates]);
 
   const handleCreateInterview = (e: React.FormEvent) => {

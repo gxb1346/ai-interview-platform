@@ -63,8 +63,14 @@ public interface ResumeRepository extends JpaRepository<Resume, Long> {
             @Param("maxScore") Integer maxScore
     );
 
+    /** 按内容哈希查找未删除的简历（支持去重） */
+    java.util.List<Resume> findByContentHashAndDeletedFalse(String contentHash);
+
     /** 查找所有未删除的简历（兼容旧版） */
     java.util.List<Resume> findByDeletedFalseOrderByCreatedAtDesc();
+
+    /** 查找已移入人才库且未删除的候选人 */
+    java.util.List<Resume> findByInTalentPoolTrueAndDeletedFalseOrderByCreatedAtDesc();
 
     /** 查找已移入人才库的候选人 */
     java.util.List<Resume> findByInTalentPoolTrueOrderByCreatedAtDesc();

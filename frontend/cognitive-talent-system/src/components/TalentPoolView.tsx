@@ -53,6 +53,26 @@ export default function TalentPoolView({
   const [scheduledTime, setScheduledTime] = useState("");
   const [scheduleNotes, setScheduleNotes] = useState("");
 
+  // 移出人才库
+  const [removingId, setRemovingId] = useState<number | null>(null);
+
+  const handleRemoveFromTalentPool = async (id: number) => {
+    if (!confirm("确定将该候选人移出人才库？")) return;
+    setRemovingId(id);
+    try {
+      const res = await fetch(`${API_BASE}/api/resume/${id}/remove-from-talent-pool`, { method: "DELETE" });
+      const json: ApiResult<ResumeVO> = await res.json();
+      if (json.code === 200) {
+        setCandidates(prev => prev.filter(c => c.id !== id));
+        if (drawerCandidate?.id === id) setDrawerCandidate(null);
+      }
+    } catch (err: any) {
+      console.error("移出人才库失败:", err);
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
   const fetchTalentPool = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -346,9 +366,11 @@ export default function TalentPoolView({
             </div>
 
             <div className="flex items-center justify-between border-t border-slate-100 pt-4 mt-4 opacity-80 group-hover:opacity-100 transition duration-200">
-              <span className="text-[10px] text-slate-400 font-sans">
-                分析于：{cand.analyzedAt?.substring(5, 10) || "—"}
-              </span>
+              <button onClick={(e) => { e.stopPropagation(); handleRemoveFromTalentPool(cand.id); }}
+                disabled={removingId === cand.id}
+                className="text-[10px] font-semibold text-red-500 bg-red-50 hover:bg-red-100 border border-red-200 px-2.5 py-1.5 rounded-lg transition cursor-pointer disabled:opacity-40">
+                {removingId === cand.id ? "..." : "移出人才库"}
+              </button>
               <div className="flex items-center gap-1.5">
                 <button onClick={(e) => { e.stopPropagation(); onNavigateToInterview(toCandidate(cand)); }}
                   className="text-[10px] font-bold text-primary bg-primary/5 hover:bg-primary/10 border border-primary/10 px-2.5 py-1.5 rounded-lg transition cursor-pointer">
@@ -515,10 +537,17 @@ export default function TalentPoolView({
 
             {/* 底部操作 */}
             <div className="border-t border-slate-100 pt-5 flex items-center justify-between">
-              <button onClick={() => setDrawerCandidate(null)}
-                className="font-sans text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-5 rounded-lg transition cursor-pointer">
-                返回列表
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setDrawerCandidate(null)}
+                  className="font-sans text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-5 rounded-lg transition cursor-pointer">
+                  返回列表
+                </button>
+                <button onClick={() => { handleRemoveFromTalentPool(drawerCandidate.id); }}
+                  disabled={removingId === drawerCandidate.id}
+                  className="font-sans text-xs bg-red-50 hover:bg-red-100 text-red-600 font-semibold border border-red-200 py-2.5 px-4 rounded-lg transition cursor-pointer disabled:opacity-40">
+                  {removingId === drawerCandidate.id ? "..." : "移出人才库"}
+                </button>
+              </div>
               <div className="flex items-center gap-3">
                 <button onClick={() => { setDrawerCandidate(null); onNavigateToInterview(toCandidate(drawerCandidate)); }}
                   className="font-sans text-xs text-primary bg-primary/10 border border-primary/10 hover:bg-primary/20 font-bold py-2.5 px-5 rounded-lg transition cursor-pointer">

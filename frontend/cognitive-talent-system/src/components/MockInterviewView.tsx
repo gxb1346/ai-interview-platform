@@ -95,9 +95,12 @@ export default function MockInterviewView({
   }, []);
 
   const allCandidates = React.useMemo(() => {
-    const merged = [...candidates];
-    talentCandidates.forEach(tc => { if (!merged.some(c => c.id === tc.id)) merged.push(tc); });
-    return merged;
+    // talentCandidates 来自后端人才库（权威来源），candidates 是本地存储
+    // 优先使用后端数据，避免已移除人才库的候选人仍出现
+    const talentNames = new Set(talentCandidates.map(c => `${c.name}|${c.role}|${c.matchScore}`));
+    // 只保留 candidates 中不在 talentCandidates 里的（虚拟候选人）
+    const virtualCandidates = candidates.filter(c => !talentNames.has(`${c.name}|${c.role}|${c.matchScore}`));
+    return [...talentCandidates, ...virtualCandidates];
   }, [candidates, talentCandidates]);
 
   useEffect(() => {

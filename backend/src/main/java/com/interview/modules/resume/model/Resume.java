@@ -36,6 +36,10 @@ public class Resume {
     /** 文件大小 (字节) */
     private Long fileSize;
 
+    /** 简历内容MD5哈希值，用于去重 */
+    @Column(nullable = true)
+    private String contentHash;
+
     /** Tika 提取的纯文本内容 */
     @Column(columnDefinition = "TEXT")
     private String rawText;

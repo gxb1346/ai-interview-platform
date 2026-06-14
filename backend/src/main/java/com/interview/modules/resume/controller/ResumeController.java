@@ -107,6 +107,18 @@ public class ResumeController {
     }
 
     /**
+     * 从人才库移除
+     */
+    @DeleteMapping("/{id}/remove-from-talent-pool")
+    public Result<ResumeVO> removeFromTalentPool(@PathVariable Long id) {
+        try {
+            return Result.success(resumeService.removeFromTalentPool(id));
+        } catch (Exception e) {
+            return Result.error(e.getMessage());
+        }
+    }
+
+    /**
      * 根据 ID 获取简历详情
      */
     @GetMapping("/{id}")

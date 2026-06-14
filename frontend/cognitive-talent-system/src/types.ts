@@ -274,6 +274,31 @@ export interface EvaluationReport {
   pdfReportPath: string | null;
 }
 
+/* ===== 知识库模块类型 ===== */
+
+/** 知识文档 */
+export interface KnowledgeDocument {
+  id: number;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  title: string;
+  description: string | null;
+  chunkCount: number;
+  indexStatus: "PENDING" | "INDEXING" | "INDEXED" | "FAILED";
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 知识库统计 */
+export interface KnowledgeStats {
+  totalDocuments: number;
+  indexedDocuments: number;
+  pendingDocuments: number;
+  failedDocuments: number;
+}
+
 /** 阶段时长对应表 */
 export const STAGE_LABELS: Record<string, string> = {
   selfIntro: "自我介绍",

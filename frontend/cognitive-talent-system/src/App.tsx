@@ -18,7 +18,9 @@ import {
   BrainCircuit,
   MessageSquare,
   Video,
-  ClipboardList
+  ClipboardList,
+  BookOpen,
+  Database
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8082";
@@ -34,6 +36,8 @@ import MockInterviewView from "./components/MockInterviewView";
 import InterviewRecordsView from "./components/InterviewRecordsView";
 import ScheduleView from "./components/ScheduleView";
 import ResumeManageView from "./components/ResumeManageView";
+import KnowledgeBaseView from "./components/KnowledgeBaseView";
+import KnowledgeQAView from "./components/KnowledgeQAView";
 
 type ActiveView =
   | "RESUME_ANALYSIS"
@@ -42,7 +46,9 @@ type ActiveView =
   | "INTERVIEW_CENTER"
   | "MOCK_INTERVIEW"
   | "INTERVIEW_RECORDS"
-  | "SCHEDULE";
+  | "SCHEDULE"
+  | "KNOWLEDGE_BASE"
+  | "KNOWLEDGE_QA";
 
 // 从 localStorage 读取数据，失败则回退到预设数据
 function loadFromStorage<T>(key: string, fallback: T): T {
@@ -197,6 +203,10 @@ export default function App() {
         return "面试历史记录";
       case "SCHEDULE":
         return "日程安排";
+      case "KNOWLEDGE_BASE":
+        return "知识库管理";
+      case "KNOWLEDGE_QA":
+        return "知识问答助手";
       default:
         return "系统仪表盘";
     }
@@ -238,6 +248,7 @@ export default function App() {
                 { id: "INTERVIEW_CENTER", label: "面试中心", icon: Video },
                 { id: "MOCK_INTERVIEW", label: "模拟面试", icon: MessageSquareCode },
                 { id: "INTERVIEW_RECORDS", label: "面试记录", icon: History },
+                { id: "KNOWLEDGE_BASE", label: "知识库", icon: Database },
               ].map((item) => {
                 const IconComponent = item.icon;
                 const isActive = currentView === item.id;
@@ -390,6 +401,18 @@ export default function App() {
 
             {currentView === "SCHEDULE" && (
               <ScheduleView interviews={interviews} />
+            )}
+
+            {currentView === "KNOWLEDGE_BASE" && (
+              <KnowledgeBaseView
+                onNavigateToQA={() => setCurrentView("KNOWLEDGE_QA")}
+              />
+            )}
+
+            {currentView === "KNOWLEDGE_QA" && (
+              <KnowledgeQAView
+                onNavigateBack={() => setCurrentView("KNOWLEDGE_BASE")}
+              />
             )}
           </div>
         </main>
