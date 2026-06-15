@@ -237,6 +237,8 @@ export interface ChatResponse {
   currentRound: number;
   currentStage: string;
   status: string;
+  /** 语音面试时，后端返回 base64 编码的 TTS 音频数据 */
+  audio?: string;
 }
 
 /** 方向推荐结果 */

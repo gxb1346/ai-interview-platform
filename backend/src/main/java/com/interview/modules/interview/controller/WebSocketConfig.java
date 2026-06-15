@@ -1,6 +1,5 @@
 package com.interview.modules.interview.controller;
 
-import com.interview.modules.interview.controller.VoiceInterviewWebSocketHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -16,15 +15,22 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final VoiceInterviewWebSocketHandler voiceHandler;
+    private final AsrWebSocketHandler asrHandler;
 
-    public WebSocketConfig(VoiceInterviewWebSocketHandler voiceHandler) {
+    public WebSocketConfig(VoiceInterviewWebSocketHandler voiceHandler,
+                           AsrWebSocketHandler asrHandler) {
         this.voiceHandler = voiceHandler;
+        this.asrHandler = asrHandler;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         // 语音面试 WebSocket 端点
         registry.addHandler(voiceHandler, "/ws/voice-interview/{sessionId}")
+                .setAllowedOrigins("*");
+
+        // 实时 ASR 语音识别端点
+        registry.addHandler(asrHandler, "/ws/asr")
                 .setAllowedOrigins("*");
     }
 

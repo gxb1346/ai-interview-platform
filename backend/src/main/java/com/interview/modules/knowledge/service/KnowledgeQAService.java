@@ -1,15 +1,22 @@
 package com.interview.modules.knowledge.service;
 
+import com.pgvector.PGvector;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.document.DocumentMetadata;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.ai.vectorstore.filter.Filter.Expression;
-import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import tools.jackson.databind.json.JsonMapper;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -25,11 +32,25 @@ public class KnowledgeQAService {
     /** 相似度阈值（低于此值不纳入上下文） */
     private static final double SIMILARITY_THRESHOLD = 0.65;
 
+    private static final String TABLE_NAME = "public.vector_store";
+
+    private static final String BASE_SEARCH_SQL = "SELECT *, embedding <=> ? AS distance FROM "
+            + TABLE_NAME + " WHERE embedding <=> ? < ? ";
+
+    private static final String ORDER_LIMIT_SQL = " ORDER BY distance LIMIT ?";
+
     private final VectorStore vectorStore;
     private final ChatClient chatClient;
+    private final JdbcTemplate jdbcTemplate;
+    private final EmbeddingModel embeddingModel;
+    private final JsonMapper jsonMapper;
 
-    public KnowledgeQAService(VectorStore vectorStore, ChatClient.Builder chatClientBuilder) {
+    public KnowledgeQAService(VectorStore vectorStore, ChatClient.Builder chatClientBuilder,
+                               JdbcTemplate jdbcTemplate, EmbeddingModel embeddingModel) {
         this.vectorStore = vectorStore;
+        this.jdbcTemplate = jdbcTemplate;
+        this.embeddingModel = embeddingModel;
+        this.jsonMapper = JsonMapper.builder().build();
         this.chatClient = chatClientBuilder
                 .defaultSystem("你是一个专业的知识库问答助手。请基于提供的参考知识内容，准确、严谨地回答用户问题。"
                         + "如果参考知识中不包含答案，请如实告知，不要编造信息。"
@@ -89,21 +110,25 @@ public class KnowledgeQAService {
                 .topK(TOP_K)
                 .similarityThreshold(SIMILARITY_THRESHOLD);
 
-        // 如果指定了文档 ID，添加过滤条件: documentId in ['1', '2', '3']
+        // 如果指定了文档 ID，添加过滤条件
+        // 注意：Spring AI 的 FilterExpressionTextParser 会将 OR 链转换为 IN 表达式，
+        // 然后 PgVectorFilterExpressionConverter 又会错误生成 == ["9","10"] 语法。
+        // 因此这里直接使用原生 JSONPath 查询，绕过整个 Spring AI filter 转换管道。
         if (documentIds != null && !documentIds.isEmpty()) {
-            FilterExpressionBuilder fb = new FilterExpressionBuilder();
-            // documentId 在 metadata 中以字符串存储，需转为字符串值
-            List<String> idStrs = documentIds.stream()
-                    .map(String::valueOf)
-                    .toList();
-            Expression filter;
-            if (idStrs.size() == 1) {
-                // 单个值用 eq 避免生成数组语法 ["9"]
-                filter = fb.eq("documentId", idStrs.get(0)).build();
-            } else {
-                filter = fb.in("documentId", idStrs).build();
-            }
-            builder.filterExpression(filter);
+            // 获取查询向量
+            float[] queryVector = embeddingModel.embed(question);
+            PGvector queryPgVector = new PGvector(queryVector);
+            double distance = 1 - SIMILARITY_THRESHOLD;
+
+            // 构建正确的 JSONPath 过滤条件：$.documentId == "9" || $.documentId == "10" || ...
+            String jsonPathFilter = documentIds.stream()
+                    .map(id -> "$.documentId == \"" + id + "\"")
+                    .collect(Collectors.joining(" || ", "'(", ")'::jsonpath"));
+
+            String sql = BASE_SEARCH_SQL + " AND metadata::jsonb @@ " + jsonPathFilter + ORDER_LIMIT_SQL;
+
+            return jdbcTemplate.query(sql, new DocumentRowMapper(jsonMapper),
+                    queryPgVector, queryPgVector, distance, TOP_K);
         }
 
         return vectorStore.similaritySearch(builder.build());
@@ -112,10 +137,41 @@ public class KnowledgeQAService {
     /**
      * 构建 RAG Prompt：将检索到的知识上下文注入到用户问题中
      */
+    /**
+     * RowMapper 用于将 vector_store 表的查询结果映射为 Document
+     */
+    private static class DocumentRowMapper implements RowMapper<Document> {
+
+        private final JsonMapper jsonMapper;
+
+        DocumentRowMapper(JsonMapper jsonMapper) {
+            this.jsonMapper = jsonMapper;
+        }
+
+        @Override
+        public Document mapRow(ResultSet rs, int rowNum) throws SQLException {
+            String id = rs.getString("id");
+            String content = rs.getString("content");
+            String metadataJson = rs.getString("metadata");
+            float distance = rs.getFloat("distance");
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> metadata = jsonMapper.readValue(metadataJson, Map.class);
+            metadata.put(DocumentMetadata.DISTANCE.value(), distance);
+
+            return Document.builder()
+                    .id(id)
+                    .text(content)
+                    .metadata(metadata)
+                    .score(1.0 - distance)
+                    .build();
+        }
+    }
+
     private String buildRAGPrompt(String question, List<Document> relevantDocs) {
         // 如果没有检索到相关知识，直接回答
         if (relevantDocs == null || relevantDocs.isEmpty()) {
-            return "用户问题：" + question + "\n\n（未在知识库中找到相关信息）";
+            return "用户问题：" + question + "\n\n（未在知识库中找到相关信息）\n\n请注意：你必须如实告知用户知识库中没有找到相关内容，不要编造答案。如果用户询问的不是知识库中的内容，请明确告知无法回答。";
         }
 
         // 拼接检索到的知识上下文

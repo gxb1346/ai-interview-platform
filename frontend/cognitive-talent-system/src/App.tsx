@@ -68,6 +68,9 @@ function saveToStorage<T>(key: string, data: T) {
 export default function App() {
   const [currentView, setCurrentView] = useState<ActiveView>("RESUME_ANALYSIS");
   
+  // 启动时清除可能残留的旧 localStorage 数据（避免已移除人才库的候选人仍出现）
+  try { localStorage.removeItem("recruit_candidates"); } catch {}
+  
   // App Global Sync States — 优先从 localStorage 恢复
   const [candidates, setCandidates] = useState<Candidate[]>(
     () => loadFromStorage("recruit_candidates", PRESEEDED_CANDIDATES)

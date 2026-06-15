@@ -20,6 +20,133 @@ interface MockInterviewViewProps {
 
 const API_BASE = "http://localhost:8082";
 
+/**
+ * ASR 英文技术术语后处理校正
+ * 将 ASR 返回文本中常见的误识英文词纠正为正确写法
+ */
+const ASR_CORRECTIONS: [RegExp, string][] = [
+  // ===== Redis (常见误识: reddies, ladies, radish, ready's) =====
+  [/\breddis\b/gi, "Redis"],
+  [/\bredies\b/gi, "Redis"],
+  [/\brediesi\b/gi, "Redis"],
+  [/\bredis\b/gi, "Redis"],
+  [/\bladys?\b/gi, "Redis"],
+  [/\blad[ei]es\b/gi, "Redis"],
+  [/\blady['’]?s\b/gi, "Redis"],
+  [/\breddish\b/gi, "Redis"],
+  [/\bradish\b/gi, "Redis"],
+  [/\bre[- ]?dis\b/gi, "Redis"],
+  // ===== Spring Boot (常见误识: sprboard, springboard, spread boot) =====
+  [/\bspring boot\b/gi, "Spring Boot"],
+  [/\bspringboot\b/gi, "Spring Boot"],
+  [/\bsprboard\b/gi, "Spring Boot"],
+  [/\bspread[ -]?boot\b/gi, "Spring Boot"],
+  [/\bspringboard\b/gi, "Spring Boot"],
+  [/\bsprint[ -]?boot\b/gi, "Spring Boot"],
+  [/\bspringport\b/gi, "Spring Boot"],
+  [/\bsprin[gk]?boot\b/gi, "Spring Boot"],
+  // ===== Spring Cloud =====
+  [/\bspringcloud\b/gi, "Spring Cloud"],
+  [/\bspring[ -]?cloud\b/gi, "Spring Cloud"],
+  // ===== MyBatis =====
+  [/\bmy batis\b/gi, "MyBatis"],
+  [/\bmybatis\b/gi, "MyBatis"],
+  [/\bmy batis plus\b/gi, "MyBatis Plus"],
+  [/\bmabatis\b/gi, "MyBatis"],
+  // ===== Docker (常见误识: doctor, dicker) =====
+  [/\bdocker\b/gi, "Docker"],
+  [/\bdoctor\b/gi, "Docker"],
+  // ===== Kubernetes =====
+  [/\bkubernetes\b/gi, "Kubernetes"],
+  [/\bk8s\b/gi, "K8s"],
+  [/\bkubornetis\b/gi, "Kubernetes"],
+  [/\bkubenetes\b/gi, "Kubernetes"],
+  // ===== Elasticsearch =====
+  [/\belasticsearch\b/gi, "Elasticsearch"],
+  [/\belastic[ -]?search\b/gi, "Elasticsearch"],
+  [/\blasticsearch\b/gi, "Elasticsearch"],
+  // ===== 数据库 =====
+  [/\bmysql\b/gi, "MySQL"],
+  [/\bmy[ -]?sql\b/gi, "MySQL"],
+  [/\bmy circle\b/gi, "MySQL"],
+  [/\bmy sequel\b/gi, "MySQL"],
+  [/\bpostgresql\b/gi, "PostgreSQL"],
+  [/\bpostgres\b/gi, "PostgreSQL"],
+  [/\bmongodb\b/gi, "MongoDB"],
+  [/\bmongo[ -]?db\b/gi, "MongoDB"],
+  // ===== 消息队列 =====
+  [/\bkafka\b/gi, "Kafka"],
+  [/\bkaffka\b/gi, "Kafka"],
+  [/\brabbitmq\b/gi, "RabbitMQ"],
+  [/\brabi[td]mq\b/gi, "RabbitMQ"],
+  [/\brocketmq\b/gi, "RocketMQ"],
+  [/\brock iq\b/gi, "RocketMQ"],
+  // ===== 网关与代理 =====
+  [/\bnginx\b/gi, "Nginx"],
+  [/\bengine x\b/gi, "Nginx"],
+  [/\benginx\b/gi, "Nginx"],
+  // ===== 编程语言 =====
+  [/\bjavascript\b/gi, "JavaScript"],
+  [/\bjava[ -]?script\b/gi, "JavaScript"],
+  [/\btypescript\b/gi, "TypeScript"],
+  [/\btype[ -]?script\b/gi, "TypeScript"],
+  [/\bpython\b/gi, "Python"],
+  [/\bpy[ -]?thon\b/gi, "Python"],
+  [/\bkotlin\b/gi, "Kotlin"],
+  [/\bcotlin\b/gi, "Kotlin"],
+  [/\bgolang\b/gi, "Go"],
+  [/\bgo[ -]?lang\b/gi, "Go"],
+  // ===== 框架与库 =====
+  [/\bmicroservice\b/gi, "Microservice"],
+  [/\bmicroservices\b/gi, "Microservices"],
+  [/\bmicro[ -]?service\b/gi, "Microservice"],
+  [/\bmicro[ -]?services\b/gi, "Microservices"],
+  [/\bpytorch\b/gi, "PyTorch"],
+  [/\bpio[ -]?torch\b/gi, "PyTorch"],
+  [/\btensorflow\b/gi, "TensorFlow"],
+  [/\btensor[ -]?flow\b/gi, "TensorFlow"],
+  // ===== 平台与工具 =====
+  [/\bgithub\b/gi, "GitHub"],
+  [/\bgithup\b/gi, "GitHub"],
+  [/\bgit 哈b\b/gi, "GitHub"],
+  [/\bgitlab\b/gi, "GitLab"],
+  [/\bgit[ -]?lab\b/gi, "GitLab"],
+  [/\bgit\b/gi, "Git"],
+  // ===== 缩写与协议 =====
+  [/\bjwt\b/gi, "JWT"],
+  [/\bj[ -]?w[ -]?t\b/gi, "JWT"],
+  [/\bjvm\b/gi, "JVM"],
+  [/\bj[ -]?v[ -]?m\b/gi, "JVM"],
+  [/\borm\b/gi, "ORM"],
+  [/\bo[ -]?r[ -]?m\b/gi, "ORM"],
+  [/\baop\b/gi, "AOP"],
+  [/\ba[ -]?o[ -]?p\b/gi, "AOP"],
+  [/\bioc\b/gi, "IOC"],
+  [/\bi[ -]?o[ -]?c\b/gi, "IOC"],
+  [/\bdd d\b/gi, "DDD"],
+  [/\bddd\b/gi, "DDD"],
+  [/\bdd[ -]?d\b/gi, "DDD"],
+  [/\brpc\b/gi, "RPC"],
+  [/\br[ -]?p[ -]?c\b/gi, "RPC"],
+  [/\bapi\b/gi, "API"],
+  [/\ba[ -]?p[ -]?i\b/gi, "API"],
+  [/\bsdk\b/gi, "SDK"],
+  [/\bs[ -]?d[ -]?k\b/gi, "SDK"],
+  [/\bll m\b/gi, "LLM"],
+  [/\bllm\b/gi, "LLM"],
+  [/\bl[ -]?l[ -]?m\b/gi, "LLM"],
+];
+
+/** 对 ASR 识别文本进行后处理校正 */
+function correctAsrText(text: string): string {
+  let corrected = text;
+  for (const [pattern, replacement] of ASR_CORRECTIONS) {
+    corrected = corrected.replace(pattern, replacement);
+  }
+  return corrected;
+}
+
+
 const DIRECTIONS = [
   "AI Agent开发", "算法与数据结构", "阿里后端", "字节后端",
   "前端工程", "Java后端开发", "腾讯后端", "Python后端开发",
@@ -60,10 +187,48 @@ export default function MockInterviewView({
   const [recommendations, setRecommendations] = useState<DirectionRecommendation[]>([]);
   const [recommending, setRecommending] = useState(false);
 
+  // 面试官流式回复（逐字输出效果）
+  const [streamingReply, setStreamingReply] = useState<string>("");
+  const streamingTimerRef = useRef<number | null>(null);
+
   // 语音
   const [isRecording, setIsRecording] = useState(false);
   const [interimText, setInterimText] = useState("");
   const recognitionRef = useRef<any>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  // WebSocket 实时 ASR
+  const wsRef = useRef<WebSocket | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const pcmBufferRef = useRef<Int16Array[]>([]);
+  const pcmFlushTimerRef = useRef<number | null>(null);
+  const wsConnectedRef = useRef(false);
+
+  // 麦克风设备选择
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+
+  // 枚举可用麦克风设备
+  useEffect(() => {
+    async function enumerateMicDevices() {
+      try {
+        // 先请求一次权限，确保能获取到设备列表
+        await navigator.mediaDevices.getUserMedia({ audio: true }).then(s => s.getTracks().forEach(t => t.stop()));
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter(d => d.kind === "audioinput");
+        setAudioDevices(mics);
+        if (mics.length > 0 && !selectedDeviceId) {
+          setSelectedDeviceId(mics[0].deviceId);
+        }
+      } catch { /* 权限被拒时不阻塞 */ }
+    }
+    enumerateMicDevices();
+  }, []);
 
   // 人才库候选人
   const [talentCandidates, setTalentCandidates] = useState<Candidate[]>([]);
@@ -95,12 +260,19 @@ export default function MockInterviewView({
   }, []);
 
   const allCandidates = React.useMemo(() => {
-    // talentCandidates 来自后端人才库（权威来源），candidates 是本地存储
-    // 优先使用后端数据，避免已移除人才库的候选人仍出现
-    const talentNames = new Set(talentCandidates.map(c => `${c.name}|${c.role}|${c.matchScore}`));
-    // 只保留 candidates 中不在 talentCandidates 里的（虚拟候选人）
-    const virtualCandidates = candidates.filter(c => !talentNames.has(`${c.name}|${c.role}|${c.matchScore}`));
-    return [...talentCandidates, ...virtualCandidates];
+    // talentCandidates 来自后端人才库（权威来源），优先级最高
+    // 以 name+role 为唯一标识，忽略可能不一致的 matchScore
+    const talentKeys = new Set(talentCandidates.map(c => `${c.name}|${c.role}`));
+    // 只保留 candidates 中不在 talentCandidates 里的条目（纯虚拟候选人）
+    // 同时在最终结果中按 name+role 去重，避免同一个人出现两次
+    const merged = [...talentCandidates, ...candidates.filter(c => !talentKeys.has(`${c.name}|${c.role}`))];
+    const seen = new Set<string>();
+    return merged.filter(c => {
+      const key = `${c.name}|${c.role}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [candidates, talentCandidates]);
 
   useEffect(() => {
@@ -109,7 +281,13 @@ export default function MockInterviewView({
   }, [preSelectedCandidate, candidates]);
 
   useEffect(() => {
-    return () => { if (timerInterval) clearInterval(timerInterval); };
+    return () => {
+      if (timerInterval) clearInterval(timerInterval);
+      if (streamingTimerRef.current !== null) {
+        clearInterval(streamingTimerRef.current);
+        streamingTimerRef.current = null;
+      }
+    };
   }, [timerInterval]);
 
   useEffect(() => {
@@ -221,6 +399,23 @@ export default function MockInterviewView({
     } finally { setEvaluating(false); }
   };
 
+  /** 播放 TTS 语音回复 */
+  const playTTSAudio = useCallback((audioBase64: string) => {
+    try {
+      // 输出格式为 WAV（由后端 AudioService 的 CosyVoice 参数决定）
+      const audioSrc = `data:audio/wav;base64,${audioBase64}`;
+      // 复用 audio 元素，避免重复创建
+      if (!audioRef.current) {
+        audioRef.current = new Audio();
+      }
+      const audio = audioRef.current;
+      audio.src = audioSrc;
+      audio.play().catch(err => console.warn("TTS 自动播放被拦截（需要用户交互）:", err));
+    } catch (err) {
+      console.error("TTS 播放失败:", err);
+    }
+  }, []);
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || thinking || !sessionId) return;
@@ -238,10 +433,33 @@ export default function MockInterviewView({
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: ChatResponse = await res.json();
-      setMessages(prev => [...prev, {
-        id: "inter_" + Date.now(), sender: "interviewer", text: data.reply,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-      }]);
+
+      // 面试官回复流式逐字输出（typewriter 效果）
+      const replyText = data.reply || "";
+      const replyId = "inter_" + Date.now();
+      const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+      let charIdx = 0;
+      const typeSpeed = 30; // ms/字符，约 33 字符/秒
+      const timerId = window.setInterval(() => {
+        charIdx++;
+        const partialText = replyText.substring(0, charIdx);
+        setStreamingReply(partialText);
+        if (charIdx >= replyText.length) {
+          clearInterval(timerId);
+          streamingTimerRef.current = null;
+          // 流式输出结束后，将完整消息加入 messages 数组
+          setMessages(prev => [...prev, { id: replyId, sender: "interviewer" as const, text: replyText, timestamp }]);
+          setStreamingReply("");
+        }
+      }, typeSpeed);
+      streamingTimerRef.current = timerId;
+
+      // 如果后端返回了语音音频，自动播放（语音面试模式默认播放，文字面试也可播放）
+      if (data.audio) {
+        playTTSAudio(data.audio);
+      }
+
       if (data.status === "COMPLETED") {
         if (timerInterval) clearInterval(timerInterval);
         setTimerInterval(null);
@@ -302,30 +520,198 @@ export default function MockInterviewView({
     return `${m < 10 ? "0" : ""}${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
-  // 语音
+  // 语音 - 始终使用 WebSocket 实时 ASR
   const toggleVoiceRecording = () => {
     if (isRecording) { stopVoiceRecording(); return; }
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { alert("浏览器不支持语音识别"); return; }
-    const recognition = new SpeechRecognition();
-    recognition.lang = "zh-CN"; recognition.continuous = true; recognition.interimResults = true;
-    recognition.onresult = (event: any) => {
-      let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) setInputText(p => p + event.results[i][0].transcript);
-        else interim += event.results[i][0].transcript;
-      }
-      setInterimText(interim);
-    };
-    recognition.onerror = () => { setIsRecording(false); setInterimText(""); };
-    recognition.onend = () => { setIsRecording(false); setInterimText(""); };
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsRecording(true);
+
+    // 直接使用 WebSocket 实时 ASR（绕过浏览器原生 SpeechRecognition，
+    // 因为原生 API 依赖 Google 服务，且不可控制格式和模型）
+    startMediaRecorderFallback();
   };
+
+  /** WebSocket 实时 ASR - 使用 AudioContext 直接获取 PCM 音频流 */
+  const startWebSocketRecording = async () => {
+    try {
+      // 请求麦克风
+      const audioConstraints: MediaStreamConstraints["audio"] = selectedDeviceId
+        ? { deviceId: { exact: selectedDeviceId } }
+        : true;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      micStreamRef.current = stream;
+
+      // 打开 WebSocket 连接
+      const ws = new WebSocket(`ws://localhost:8082/ws/asr`);
+      wsRef.current = ws;
+      wsConnectedRef.current = false;
+
+      ws.onopen = () => {
+        wsConnectedRef.current = true;
+        console.log("[ASR WS] 连接已建立");
+        setInterimText("🎤 录音中...");
+
+        // WebSocket 连接建立后启动 AudioContext
+        try {
+          // 尝试 16kHz，部分浏览器可能不支持，回退到默认采样率
+          let audioCtx: AudioContext;
+          try {
+            audioCtx = new AudioContext({ sampleRate: 16000 });
+          } catch {
+            console.warn("[ASR WS] 16kHz AudioContext 不受支持，使用默认采样率");
+            audioCtx = new AudioContext();
+          }
+          audioCtxRef.current = audioCtx;
+
+          const source = audioCtx.createMediaStreamSource(stream);
+          sourceNodeRef.current = source;
+
+          // 使用 ScriptProcessorNode 获取原始 PCM
+          const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+          processorRef.current = processor;
+
+          processor.onaudioprocess = (event) => {
+            const inputData = event.inputBuffer.getChannelData(0);
+            // Float32 -> Int16 PCM
+            const pcm16 = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+              const s = Math.max(-1, Math.min(1, inputData[i]));
+              pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            pcmBufferRef.current.push(pcm16);
+          };
+
+          source.connect(processor);
+          // 使用 GainNode(0) 保持音频图活跃，但不播放麦克风声音到扬声器
+          const silentGain = audioCtx.createGain();
+          silentGain.gain.value = 0;
+          processor.connect(silentGain);
+          silentGain.connect(audioCtx.destination);
+
+          // 每 500ms 刷新一次 PCM 缓冲区到 WebSocket
+          const flushTimer = window.setInterval(() => {
+            if (pcmBufferRef.current.length === 0 || !wsConnectedRef.current) return;
+            const chunks = pcmBufferRef.current.splice(0);
+            const totalLen = chunks.reduce((sum, arr) => sum + arr.length, 0);
+            const merged = new Int16Array(totalLen);
+            let offset = 0;
+            for (const arr of chunks) {
+              merged.set(arr, offset);
+              offset += arr.length;
+            }
+            // 发送 PCM 二进制数据
+            ws.send(merged.buffer);
+          }, 500);
+          pcmFlushTimerRef.current = flushTimer;
+
+          setIsRecording(true);
+        } catch (ctxErr) {
+          console.error("[ASR WS] AudioContext 初始化失败:", ctxErr);
+          setInterimText("⚠️ 音频初始化失败");
+          ws.close();
+          stream.getTracks().forEach(t => t.stop());
+        }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("[ASR WS] 收到消息:", data);
+          if (data.type === "transcript" && data.text) {
+            const correctedText = correctAsrText(data.text);
+            if (data.isFinal) {
+              setInputText(p => p + correctedText);
+              setInterimText("");
+            } else {
+              setInterimText(correctedText);
+            }
+          } else if (data.type === "error") {
+            console.warn("[ASR WS] 错误:", data.message);
+            setInterimText("⚠️ " + (data.message || "识别错误"));
+          } else if (data.type === "complete") {
+            console.log("[ASR WS] 识别完成");
+            setInterimText("");
+          } else if (data.type === "ready") {
+            console.log("[ASR WS] 就绪:", data.message);
+          }
+        } catch (e) {
+          console.warn("[ASR WS] 消息解析失败:", event.data);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error("[ASR WS] 连接错误:", err);
+        setInterimText("⚠️ WebSocket 连接失败");
+        setIsRecording(false);
+      };
+
+      ws.onclose = (event) => {
+        console.log("[ASR WS] 连接关闭:", event.code, event.reason);
+        wsConnectedRef.current = false;
+        if (pcmFlushTimerRef.current !== null) {
+          clearInterval(pcmFlushTimerRef.current);
+          pcmFlushTimerRef.current = null;
+        }
+        setIsRecording(false);
+      };
+    } catch (err) {
+      console.error("[ASR WS] 启动失败:", err);
+      setInterimText("⚠️ 麦克风访问被拒绝");
+      alert("无法访问麦克风，请检查浏览器权限设置。");
+    }
+  };
+
+  /** MediaRecorder 兜底录制（作为 WebSocket 的最终后备） */
+  const startMediaRecorderFallback = async () => {
+    // 先尝试 WebSocket 实时方案
+    await startWebSocketRecording();
+  };
+
+  /**
+   * 停止录音
+   * 停止浏览器原生 SpeechRecognition + WebSocket ASR + AudioContext
+   */
   const stopVoiceRecording = () => {
-    if (recognitionRef.current) { recognitionRef.current.stop(); recognitionRef.current = null; }
-    setIsRecording(false); setInterimText("");
+    // 停止浏览器原生 SpeechRecognition
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    // 停止 MediaRecorder 兜底
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+    }
+    // 停止 AudioContext / ScriptProcessorNode
+    if (pcmFlushTimerRef.current !== null) {
+      clearInterval(pcmFlushTimerRef.current);
+      pcmFlushTimerRef.current = null;
+    }
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    if (sourceNodeRef.current) {
+      sourceNodeRef.current.disconnect();
+      sourceNodeRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+    // 停止麦克风流
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach(t => t.stop());
+      micStreamRef.current = null;
+    }
+    // 关闭 WebSocket（发送 EOS 信号）
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send("EOS");
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    wsConnectedRef.current = false;
+    pcmBufferRef.current = [];
+    setIsRecording(false);
+    setInterimText("");
   };
 
   const stages = stageMinutes();
@@ -399,6 +785,25 @@ export default function MockInterviewView({
                 </button>
               ))}
             </div>
+
+            {/* 麦克风设备选择 - 仅语音模式显示 */}
+            {interviewMode === "voice" && audioDevices.length > 1 && (
+              <div className="flex items-center gap-3 bg-slate-50/70 border border-slate-200 rounded-xl px-4 py-2.5">
+                <label className="text-[11px] font-semibold text-slate-500 shrink-0 flex items-center gap-1.5">
+                  <Mic className="w-3.5 h-3.5" />
+                  麦克风
+                </label>
+                <select value={selectedDeviceId}
+                  onChange={e => setSelectedDeviceId(e.target.value)}
+                  className="flex-1 text-xs py-2 px-3 bg-white border border-slate-200 rounded-lg outline-none cursor-pointer">
+                  {audioDevices.map(d => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label || `麦克风 ${d.deviceId.slice(0, 8)}...`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* 面试方向 */}
@@ -525,10 +930,18 @@ export default function MockInterviewView({
                     </div>
                   </div>
                 ))}
-                {thinking && (
+                {thinking && !streamingReply && (
                   <div className="flex items-start gap-3.5">
                     <div className="p-3.5 bg-white border border-slate-100 rounded-2xl flex items-center gap-2 text-slate-400 text-xs">
                       <Loader2 className="w-4 h-4 animate-spin" /> 面试官正在思考...
+                    </div>
+                  </div>
+                )}
+                {/* 流式输出中的面试官回复 */}
+                {streamingReply && (
+                  <div className="flex items-start gap-3.5">
+                    <div className="text-xs py-2.5 px-4 rounded-2xl leading-relaxed max-w-[75%] shadow-sm bg-white text-slate-700 border border-slate-150 rounded-tl-none">
+                      {streamingReply}<span className="animate-pulse text-slate-400 font-bold">▊</span>
                     </div>
                   </div>
                 )}

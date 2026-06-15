@@ -2,14 +2,18 @@ package com.interview.modules.interview.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interview.modules.interview.model.InterviewSession;
+import com.interview.modules.interview.service.AudioService;
 import com.interview.modules.interview.service.MockInterviewService;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import static com.interview.modules.interview.model.StageConfig.STAGE_SELF_INTRO;
 
 /**
  * 语音面试 WebSocket 处理器
@@ -19,14 +23,17 @@ import java.util.concurrent.ConcurrentHashMap;
 public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler {
 
     private final MockInterviewService interviewService;
+    private final AudioService audioService;
     private final ObjectMapper objectMapper;
 
     /** 管理活跃 WebSocket 连接：sessionId -> WebSocketSession */
     private final Map<String, WebSocketSession> activeSessions = new ConcurrentHashMap<>();
 
     public VoiceInterviewWebSocketHandler(MockInterviewService interviewService,
+                                          AudioService audioService,
                                           ObjectMapper objectMapper) {
         this.interviewService = interviewService;
+        this.audioService = audioService;
         this.objectMapper = objectMapper;
     }
 
@@ -74,15 +81,28 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler {
 
     private void handleStart(WebSocketSession session, String sessionId) throws IOException {
         InterviewSession interviewSession = interviewService.startInterview(sessionId);
-        sendMessage(session, Map.of(
-                "type", "STARTED",
-                "sessionId", sessionId,
-                "firstMessage", interviewSession.getMessages().isEmpty()
-                        ? "" : interviewSession.getMessages().get(0).getText(),
-                "questions", interviewSession.getQuestions().stream()
-                        .map(q -> Map.of("id", q.getId(), "text", q.getText()))
-                        .toList()
-        ));
+
+        String firstMessage = interviewSession.getMessages().isEmpty()
+                ? "" : interviewSession.getMessages().get(0).getText();
+
+        Map<String, Object> responseData = new HashMap<>();
+        responseData.put("type", "STARTED");
+        responseData.put("sessionId", sessionId);
+        responseData.put("firstMessage", firstMessage);
+        responseData.put("currentStage", STAGE_SELF_INTRO);
+        responseData.put("questions", interviewSession.getQuestions().stream()
+                .map(q -> Map.of("id", q.getId(), "text", q.getText()))
+                .toList());
+
+        // 开场白也生成语音
+        if (!firstMessage.isEmpty()) {
+            String audioBase64 = audioService.textToSpeechBase64(firstMessage);
+            if (audioBase64 != null) {
+                responseData.put("audio", audioBase64);
+            }
+        }
+
+        sendMessage(session, responseData);
     }
 
     private void handleAnswer(WebSocketSession session, String sessionId, String answer) throws IOException {
@@ -91,13 +111,20 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler {
         var messages = interviewSession.getMessages();
         String reply = messages.isEmpty() ? "" : messages.get(messages.size() - 1).getText();
 
-        sendMessage(session, Map.of(
-                "type", "REPLY",
-                "sessionId", sessionId,
-                "reply", reply,
-                "currentRound", interviewSession.getCurrentRound(),
-                "status", interviewSession.getStatus()
-        ));
+        Map<String, Object> responseData = new HashMap<>();
+        responseData.put("type", "REPLY");
+        responseData.put("sessionId", sessionId);
+        responseData.put("reply", reply);
+        responseData.put("currentRound", interviewSession.getCurrentRound());
+        responseData.put("status", interviewSession.getStatus());
+
+        // 语音面试模式下，同步生成语音回复
+        String audioBase64 = audioService.textToSpeechBase64(reply);
+        if (audioBase64 != null) {
+            responseData.put("audio", audioBase64);
+        }
+
+        sendMessage(session, responseData);
     }
 
     private void handleEnd(WebSocketSession session, String sessionId) throws IOException {

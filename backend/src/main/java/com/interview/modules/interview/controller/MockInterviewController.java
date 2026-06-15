@@ -1,6 +1,7 @@
 package com.interview.modules.interview.controller;
 
 import com.interview.modules.interview.model.InterviewSession;
+import com.interview.modules.interview.service.AudioService;
 import com.interview.modules.interview.service.MockInterviewService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,9 +19,12 @@ import java.util.Map;
 public class MockInterviewController {
 
     private final MockInterviewService interviewService;
+    private final AudioService audioService;
 
-    public MockInterviewController(MockInterviewService interviewService) {
+    public MockInterviewController(MockInterviewService interviewService,
+                                    AudioService audioService) {
         this.interviewService = interviewService;
+        this.audioService = audioService;
     }
 
     /**
@@ -69,11 +73,19 @@ public class MockInterviewController {
         var messages = session.getMessages();
         var lastMessage = messages.get(messages.size() - 1);
 
+        String replyText = lastMessage.getText();
+
         Map<String, Object> response = new HashMap<>();
-        response.put("reply", lastMessage.getText());
+        response.put("reply", replyText);
         response.put("currentRound", session.getCurrentRound());
         response.put("currentStage", session.getCurrentStage());
         response.put("status", session.getStatus());
+
+        // 文字面试模式下，后台异步生成语音，使页面可播放
+        String audioBase64 = audioService.textToSpeechBase64(replyText);
+        if (audioBase64 != null) {
+            response.put("audio", audioBase64);
+        }
 
         return ResponseEntity.ok(response);
     }
