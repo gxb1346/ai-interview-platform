@@ -3,6 +3,8 @@ package com.interview.modules.resume.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interview.common.result.PageResult;
+import com.interview.infrastructure.stream.model.TaskType;
+import com.interview.infrastructure.stream.producer.TaskProducer;
 import com.interview.modules.resume.model.AnalysisResult;
 import com.interview.modules.resume.model.Resume;
 import com.interview.modules.resume.model.ResumeUpdateDTO;
@@ -26,8 +28,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -48,6 +52,7 @@ public class ResumeService {
     private final S3Client s3Client;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
+    private final TaskProducer taskProducer;
 
     @Value("${app.storage.bucket}")
     private String bucket;
@@ -57,13 +62,15 @@ public class ResumeService {
                          ResumeRepository resumeRepository,
                          S3Client s3Client,
                          ObjectMapper objectMapper,
-                         StringRedisTemplate redisTemplate) {
+                         StringRedisTemplate redisTemplate,
+                         TaskProducer taskProducer) {
         this.tikaService = tikaService;
         this.analysisService = analysisService;
         this.resumeRepository = resumeRepository;
         this.s3Client = s3Client;
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
+        this.taskProducer = taskProducer;
     }
 
     /**
@@ -132,6 +139,54 @@ public class ResumeService {
         }
 
         return ResumeVO.fromEntity(saved);
+    }
+
+    /**
+     * 异步上传并分析简历（通过 Redis Stream）
+     * 同步阶段：校验、Tika 解析、去重
+     * 异步阶段（消费者）：S3 上传 → AI 分析 → DB 持久化 → Redis 缓存
+     *
+     * @return taskId（可关联任务状态）
+     */
+    @Transactional
+    public String uploadResumeAsync(MultipartFile file, String targetJob) {
+        String fileName = file.getOriginalFilename();
+        if (fileName == null) fileName = "unknown";
+        String fileType = TikaService.getFileType(fileName);
+
+        // 校验文件类型
+        validateFileType(fileType);
+
+        // Tika 解析 → 提取纯文本
+        String rawText = tikaService.extractText(file);
+
+        // 计算内容哈希，用于去重
+        String contentHash = md5(rawText);
+
+        // 检查是否已存在相同内容的简历
+        List<Resume> existing = resumeRepository.findByContentHashAndDeletedFalse(contentHash);
+        if (!existing.isEmpty()) {
+            return "duplicate";
+        }
+
+        // 发送到 Redis Stream（消费者执行完整的 S3 上传 + AI 分析 + DB 写入 + 缓存）
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("rawText", rawText);
+        payload.put("targetJob", targetJob);
+        payload.put("contentHash", contentHash);
+        payload.put("fileName", fileName);
+        payload.put("fileType", fileType);
+        payload.put("fileSize", file.getSize());
+        payload.put("fileBytes", encodeFileBytes(file));
+        return taskProducer.sendTask(TaskType.RESUME_ANALYSIS, payload);
+    }
+
+    private String encodeFileBytes(MultipartFile file) {
+        try {
+            return java.util.Base64.getEncoder().encodeToString(file.getBytes());
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("读取文件字节失败: " + e.getMessage(), e);
+        }
     }
 
     private ResumeVO buildResumeVO(AnalysisResult result, String fileName, String fileType,

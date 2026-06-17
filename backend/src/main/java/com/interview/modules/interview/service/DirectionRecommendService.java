@@ -2,10 +2,17 @@ package com.interview.modules.interview.service;
 
 import com.interview.modules.interview.skill.InterviewSkill;
 import com.interview.modules.interview.skill.SkillRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 简历方向推荐服务（Semantic Matching）
@@ -14,15 +21,26 @@ import java.util.*;
 @Service
 public class DirectionRecommendService {
 
+    private static final Logger log = LoggerFactory.getLogger(DirectionRecommendService.class);
+
+    /** 方向推荐缓存前缀 */
+    private static final String CACHE_PREFIX = "direction:recommend:";
+
+    /** 缓存 TTL（小时） */
+    private static final long CACHE_TTL_HOURS = 24;
+
     private final ChatClient chatClient;
     private final SkillRegistry skillRegistry;
+    private final StringRedisTemplate redisTemplate;
 
     public DirectionRecommendService(ChatClient.Builder chatClientBuilder,
-                                     SkillRegistry skillRegistry) {
+                                     SkillRegistry skillRegistry,
+                                     StringRedisTemplate redisTemplate) {
         this.chatClient = chatClientBuilder
                 .defaultSystem("你是一个 AI 招聘专家，擅长根据简历内容匹配最适合的面试方向。")
                 .build();
         this.skillRegistry = skillRegistry;
+        this.redisTemplate = redisTemplate;
     }
 
     /**
@@ -34,6 +52,18 @@ public class DirectionRecommendService {
     public List<DirectionMatch> recommend(String resumeText) {
         if (resumeText == null || resumeText.isBlank()) {
             return getDefaultRecommendations();
+        }
+
+        // ---- 尝试从缓存获取 ----
+        String cacheKey = CACHE_PREFIX + md5(resumeText);
+        try {
+            String cachedJson = redisTemplate.opsForValue().get(cacheKey);
+            if (cachedJson != null) {
+                log.info("[方向推荐] 缓存命中，跳过 LLM");
+                return parseResponse(cachedJson);
+            }
+        } catch (Exception e) {
+            log.warn("[方向推荐] 读缓存失败，降级: {}", e.getMessage());
         }
 
         try {
@@ -66,10 +96,32 @@ public class DirectionRecommendService {
                     .call()
                     .content();
 
+            // ---- 写入缓存 ----
+            if (response != null) {
+                try {
+                    redisTemplate.opsForValue().set(cacheKey, response, CACHE_TTL_HOURS, TimeUnit.HOURS);
+                } catch (Exception e) {
+                    log.warn("[方向推荐] 写缓存失败: {}", e.getMessage());
+                }
+            }
+
             return parseResponse(response);
         } catch (Exception e) {
             System.err.println("方向推荐失败: " + e.getMessage());
             return getDefaultRecommendations();
+        }
+    }
+
+    /**
+     * 计算 MD5 哈希
+     */
+    private String md5(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            return Integer.toHexString(input.hashCode());
         }
     }
 

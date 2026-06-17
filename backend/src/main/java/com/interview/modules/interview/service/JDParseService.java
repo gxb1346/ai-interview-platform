@@ -2,12 +2,19 @@ package com.interview.modules.interview.service;
 
 import com.interview.modules.interview.model.*;
 import com.interview.modules.interview.repository.InterviewSessionRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * JD（职位描述）解析服务
@@ -16,24 +23,51 @@ import java.util.UUID;
 @Service
 public class JDParseService {
 
+    private static final Logger log = LoggerFactory.getLogger(JDParseService.class);
+
+    /** JD 解析缓存前缀 */
+    private static final String CACHE_PREFIX = "jd:parse:";
+
+    /** 缓存 TTL（小时） */
+    private static final long CACHE_TTL_HOURS = 48;
+
     private final ChatClient chatClient;
     private final SkillRegistryService skillRegistryService;
     private final InterviewSessionRepository sessionRepository;
+    private final StringRedisTemplate redisTemplate;
 
     public JDParseService(ChatClient.Builder chatClientBuilder,
                           SkillRegistryService skillRegistryService,
-                          InterviewSessionRepository sessionRepository) {
+                          InterviewSessionRepository sessionRepository,
+                          StringRedisTemplate redisTemplate) {
         this.chatClient = chatClientBuilder
                 .defaultSystem("你是一个 JD 解析专家，负责分析职位描述并提取关键信息。")
                 .build();
         this.skillRegistryService = skillRegistryService;
         this.sessionRepository = sessionRepository;
+        this.redisTemplate = redisTemplate;
     }
 
     /**
      * 解析 JD 文本，返回结构化结果
      */
     public JDParseResult parseJD(String jdText) {
+        if (jdText == null || jdText.isBlank()) {
+            return new JDParseResult("Java后端开发", List.of("通用技能"), 3, List.of());
+        }
+
+        // ---- 尝试从缓存获取 ----
+        String cacheKey = CACHE_PREFIX + md5(jdText);
+        try {
+            String cachedJson = redisTemplate.opsForValue().get(cacheKey);
+            if (cachedJson != null) {
+                log.info("[JD解析] 缓存命中，跳过 LLM");
+                return parseResponse(cachedJson);
+            }
+        } catch (Exception e) {
+            log.warn("[JD解析] 读缓存失败，降级: {}", e.getMessage());
+        }
+
         try {
             String allDirections = String.join("、", skillRegistryService.getAllDirectionNames());
 
@@ -62,6 +96,15 @@ public class JDParseService {
                     .user(prompt)
                     .call()
                     .content();
+
+            // ---- 写入缓存 ----
+            if (response != null) {
+                try {
+                    redisTemplate.opsForValue().set(cacheKey, response, CACHE_TTL_HOURS, TimeUnit.HOURS);
+                } catch (Exception e) {
+                    log.warn("[JD解析] 写缓存失败: {}", e.getMessage());
+                }
+            }
 
             return parseResponse(response);
         } catch (Exception e) {
@@ -98,6 +141,19 @@ public class JDParseService {
         session.setStatus("PREPARING");
         sessionRepository.save(session);
         return session;
+    }
+
+    /**
+     * 计算 MD5 哈希
+     */
+    private String md5(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            return Integer.toHexString(input.hashCode());
+        }
     }
 
     /**

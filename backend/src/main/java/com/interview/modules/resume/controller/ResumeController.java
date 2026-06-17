@@ -11,7 +11,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
-
 /**
  * 简历分析 REST 控制器
  *
@@ -47,6 +46,30 @@ public class ResumeController {
             return Result.error(e.getMessage());
         } catch (Exception e) {
             return Result.error("简历分析失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 异步上传简历（通过 Redis Stream 异步分析）
+     * 返回 taskId，前端可通过 taskId 查询分析进度
+     */
+    @PostMapping(value = "/upload-async", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result<Map<String, String>> uploadAsync(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "targetJob", required = false) String targetJob) {
+
+        if (file.isEmpty()) {
+            return Result.error("上传文件为空");
+        }
+
+        try {
+            String taskId = resumeService.uploadResumeAsync(file, targetJob);
+            if ("duplicate".equals(taskId)) {
+                return Result.error("该简历内容已存在，请勿重复上传");
+            }
+            return Result.success(Map.of("taskId", taskId, "status", "PENDING"));
+        } catch (Exception e) {
+            return Result.error("简历上传失败: " + e.getMessage());
         }
     }
 
