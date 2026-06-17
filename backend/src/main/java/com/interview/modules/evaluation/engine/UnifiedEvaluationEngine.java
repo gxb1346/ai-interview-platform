@@ -1,21 +1,19 @@
 package com.interview.modules.evaluation.engine;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.interview.infrastructure.ratelimit.LlmRateLimiter;
+import com.interview.infrastructure.monitor.ChatResponseHelper;
+import com.interview.infrastructure.monitor.LlmCallMonitor;
 import com.interview.modules.evaluation.model.EvaluationReport;
 import com.interview.modules.evaluation.model.EvaluationResult;
 import com.interview.modules.interview.model.InterviewMessage;
 import com.interview.modules.interview.model.InterviewSession;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -28,28 +26,17 @@ public class UnifiedEvaluationEngine {
 
     private static final int BATCH_SIZE = 5;  // 每批次评估 5 轮对话
 
-    /** 评估报告 Redis 缓存前缀 */
-    private static final String CACHE_PREFIX = "evaluation:report:";
-
-    /** 评估报告缓存 TTL（小时） */
-    private static final long CACHE_TTL_HOURS = 72;
-
-    private static final Logger log = LoggerFactory.getLogger(UnifiedEvaluationEngine.class);
-
     private final ChatClient evaluationClient;
     private final ObjectMapper objectMapper;
-    private final StringRedisTemplate redisTemplate;
-    private final LlmRateLimiter rateLimiter;
+    private final ChatResponseHelper chatHelper;
 
     public UnifiedEvaluationEngine(ChatClient.Builder chatClientBuilder,
-                                   StringRedisTemplate redisTemplate,
-                                   LlmRateLimiter rateLimiter) {
+                                    ChatResponseHelper chatHelper) {
         this.evaluationClient = chatClientBuilder
                 .defaultSystem("你是一个资深的 AI 面试评估专家，负责对面试对话进行多维度量化评估。")
                 .build();
         this.objectMapper = new ObjectMapper();
-        this.redisTemplate = redisTemplate;
-        this.rateLimiter = rateLimiter;
+        this.chatHelper = chatHelper;
     }
 
     /**
@@ -59,20 +46,6 @@ public class UnifiedEvaluationEngine {
      * @return 评估报告
      */
     public EvaluationReport evaluate(InterviewSession session) {
-        String sessionId = session.getSessionId();
-        String cacheKey = CACHE_PREFIX + sessionId;
-
-        // ---- 尝试从 Redis 缓存获取 ----
-        try {
-            String cachedJson = redisTemplate.opsForValue().get(cacheKey);
-            if (cachedJson != null) {
-                log.info("[评估] 缓存命中，跳过 LLM 评估: sessionId={}", sessionId);
-                return objectMapper.readValue(cachedJson, EvaluationReport.class);
-            }
-        } catch (Exception e) {
-            log.warn("[评估] Redis 读缓存失败，降级: {}", e.getMessage());
-        }
-
         List<InterviewMessage> messages = session.getMessages();
 
         // 1. 分批评估（对话太长则分块，每块独立评估）
@@ -87,15 +60,6 @@ public class UnifiedEvaluationEngine {
         // 4. 降级兜底（AI 调用失败时返回模板报告）
         if (finalReport == null) {
             finalReport = fallbackReport(session);
-        }
-
-        // ---- 写入 Redis 缓存 ----
-        try {
-            String json = objectMapper.writeValueAsString(finalReport);
-            redisTemplate.opsForValue().set(cacheKey, json, CACHE_TTL_HOURS, TimeUnit.HOURS);
-            log.info("[评估] 评估结果已缓存: sessionId={}", sessionId);
-        } catch (Exception e) {
-            log.warn("[评估] Redis 写缓存失败: {}", e.getMessage());
         }
 
         return finalReport;
@@ -143,21 +107,6 @@ public class UnifiedEvaluationEngine {
     private EvaluationResult evaluateBatch(List<InterviewMessage> messages, int batchIndex,
                                             int roundStart, int roundEnd) {
         try {
-            // ---- 限流检查 ----
-            if (!rateLimiter.tryAcquire()) {
-                log.warn("[评估] LLM 限流触发，使用降级评分: batch={}", batchIndex);
-                EvaluationResult fallback = new EvaluationResult();
-                fallback.setBatchId("batch_" + batchIndex);
-                fallback.setBatchIndex(batchIndex);
-                fallback.setRoundStart(roundStart);
-                fallback.setRoundEnd(roundEnd);
-                fallback.setBatchScore(50);
-                fallback.setBatchStrengths(new ArrayList<>());
-                fallback.setBatchWeaknesses(new ArrayList<>(List.of("评估服务繁忙，请稍后重试")));
-                fallback.setBatchSummary("该批次因系统限流，使用默认评分。");
-                return fallback;
-            }
-
             String conversationLog = messages.stream()
                     .map(m -> String.format("[%s]: %s", m.getSender(), m.getText()))
                     .collect(Collectors.joining("\n"));
@@ -202,10 +151,7 @@ public class UnifiedEvaluationEngine {
                     }
                     """, batchIndex, roundEnd - roundStart, conversationLog);
 
-            String response = evaluationClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
+            String response = chatHelper.call(LlmCallMonitor.BATCH_EVALUATION, evaluationClient, prompt);
 
             return parseBatchResult(response, batchIndex, roundStart, roundEnd);
 
@@ -300,19 +246,6 @@ public class UnifiedEvaluationEngine {
     private EvaluationReport aggregate(EvaluationReport structuredReport,
                                         List<EvaluationResult> batchResults) {
         try {
-            // ---- 限流检查 ----
-            if (!rateLimiter.tryAcquire()) {
-                log.warn("[评估] 汇总 LLM 限流，使用简化汇总");
-                double avgScore = batchResults.stream()
-                        .mapToInt(EvaluationResult::getBatchScore)
-                        .average()
-                        .orElse(50.0);
-                structuredReport.setOverallScore((int) Math.round(avgScore));
-                structuredReport.setSummary("评估报告基于各批次评分的加权平均生成（系统限流中）。");
-                structuredReport.setVerdict(avgScore >= 80 ? "建议录用" : avgScore >= 60 ? "待定" : "不予录用");
-                return structuredReport;
-            }
-
             String batchSummaries = batchResults.stream()
                     .map(r -> String.format("第%d批(第%d-%d轮): 评分%d - %s",
                             r.getBatchIndex(), r.getRoundStart(), r.getRoundEnd(),
@@ -351,10 +284,7 @@ public class UnifiedEvaluationEngine {
                     }
                     """, batchSummaries);
 
-            String response = evaluationClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
+            String response = chatHelper.call(LlmCallMonitor.AGGREGATE_EVALUATION, evaluationClient, prompt);
 
             return parseAggregationResult(response, structuredReport);
 

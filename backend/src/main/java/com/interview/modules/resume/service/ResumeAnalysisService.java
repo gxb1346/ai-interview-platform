@@ -1,10 +1,9 @@
 package com.interview.modules.resume.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.interview.infrastructure.ratelimit.LlmRateLimiter;
+import com.interview.infrastructure.monitor.ChatResponseHelper;
+import com.interview.infrastructure.monitor.LlmCallMonitor;
 import com.interview.modules.resume.model.AnalysisResult;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
@@ -15,17 +14,15 @@ import org.springframework.stereotype.Service;
 @Service
 public class ResumeAnalysisService {
 
-    private static final Logger log = LoggerFactory.getLogger(ResumeAnalysisService.class);
-
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
-    private final LlmRateLimiter rateLimiter;
+    private final ChatResponseHelper chatHelper;
 
     public ResumeAnalysisService(ChatClient.Builder chatClientBuilder,
-                                 LlmRateLimiter rateLimiter) {
+                                  ChatResponseHelper chatHelper) {
         this.chatClient = chatClientBuilder.build();
         this.objectMapper = new ObjectMapper();
-        this.rateLimiter = rateLimiter;
+        this.chatHelper = chatHelper;
     }
 
     /**
@@ -36,19 +33,10 @@ public class ResumeAnalysisService {
      * @return AI 分析结果
      */
     public AnalysisResult analyze(String rawText, String targetJob) {
-        // ---- 限流检查 ----
-        if (!rateLimiter.tryAcquire()) {
-            log.warn("[简历分析] LLM 限流触发，抛出异常等待重试");
-            throw new RuntimeException("LLM 调用限流，请稍后重试");
-        }
-
         try {
             String prompt = buildPrompt(rawText, targetJob);
 
-            String response = chatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
+            String response = chatHelper.call(LlmCallMonitor.RESUME_ANALYSIS, chatClient, prompt);
 
             // 清理可能的 Markdown 代码块包装
             String json = cleanJsonResponse(response);

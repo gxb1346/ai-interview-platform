@@ -16,11 +16,17 @@ import java.time.Duration;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Redis Stream 多线程消费者
+ * 支持 N 个并行消费者（同一消费者组内），实现任务并行处理
+ */
 @Component
 public class TaskConsumerRunner {
 
@@ -33,7 +39,10 @@ public class TaskConsumerRunner {
     private final AtomicBoolean running = new AtomicBoolean(true);
     private ExecutorService consumerExecutor;
 
-    private final String consumerName = "consumer-" + System.currentTimeMillis();
+    /** 活跃消费者计数 */
+    private final AtomicInteger activeConsumerCount = new AtomicInteger(0);
+
+    private final long startupTimestamp = System.currentTimeMillis();
 
     public TaskConsumerRunner(StringRedisTemplate redisTemplate,
                               ObjectMapper objectMapper,
@@ -52,10 +61,17 @@ public class TaskConsumerRunner {
     @PostConstruct
     public void start() {
         createConsumerGroup();
+        int consumerCount = RedisStreamConfig.CONSUMER_COUNT;
         consumerExecutor = Executors.newVirtualThreadPerTaskExecutor();
-        consumerExecutor.submit(this::consumeLoop);
-        log.info("[RedisStream] 消费者已启动: consumerName={}, handlers={}",
-                consumerName, handlerMap.keySet());
+        for (int i = 0; i < consumerCount; i++) {
+            String consumerName = "consumer-" + i + "-" + startupTimestamp + "-"
+                    + UUID.randomUUID().toString().substring(0, 8);
+            final String name = consumerName;
+            consumerExecutor.submit(() -> consumeLoop(name));
+            log.info("[RedisStream] 消费者已启动: consumerName={}, handlers={}",
+                    name, handlerMap.keySet());
+        }
+        log.info("[RedisStream] 全部 {} 个消费者已启动", consumerCount);
     }
 
     @PreDestroy
@@ -64,12 +80,15 @@ public class TaskConsumerRunner {
         if (consumerExecutor != null) {
             consumerExecutor.shutdown();
             try {
-                consumerExecutor.awaitTermination(5, TimeUnit.SECONDS);
+                if (!consumerExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    consumerExecutor.shutdownNow();
+                }
             } catch (InterruptedException e) {
+                consumerExecutor.shutdownNow();
                 Thread.currentThread().interrupt();
             }
         }
-        log.info("[RedisStream] 消费者已停止");
+        log.info("[RedisStream] 所有消费者已停止");
     }
 
     private void createConsumerGroup() {
@@ -85,7 +104,9 @@ public class TaskConsumerRunner {
         }
     }
 
-    private void consumeLoop() {
+    private void consumeLoop(String consumerName) {
+        activeConsumerCount.incrementAndGet();
+        log.info("[RedisStream] 消费者开始运行: consumerName={}", consumerName);
         while (running.get()) {
             try {
                 List<MapRecord<String, Object, Object>> messages = redisTemplate.opsForStream()
@@ -107,7 +128,7 @@ public class TaskConsumerRunner {
                     Object payloadObj = valueMap != null ? valueMap.get("payload") : null;
                     String messageJson = payloadObj instanceof String ? (String) payloadObj : null;
                     if (messageJson == null) {
-                        log.warn("[RedisStream] 消息格式异常，跳过: msgId={}", messageId);
+                        log.warn("[RedisStream] 消息格式异常，跳过: msgId={}, consumer={}", messageId, consumerName);
                         redisTemplate.opsForStream().acknowledge(
                                 RedisStreamConfig.STREAM_KEY, RedisStreamConfig.CONSUMER_GROUP, record.getId());
                         continue;
@@ -120,26 +141,33 @@ public class TaskConsumerRunner {
                         if (success) {
                             redisTemplate.opsForStream().acknowledge(
                                     RedisStreamConfig.STREAM_KEY, RedisStreamConfig.CONSUMER_GROUP, record.getId());
-                            log.debug("[RedisStream] 消息处理成功: taskId={}, msgId={}",
-                                    message.getTaskId(), messageId);
+                            log.debug("[RedisStream] 消息处理成功: taskId={}, msgId={}, consumer={}",
+                                    message.getTaskId(), messageId, consumerName);
                         } else {
-                            log.warn("[RedisStream] 消息处理失败（稍后重试）: taskId={}, msgId={}",
-                                    message.getTaskId(), messageId);
+                            log.warn("[RedisStream] 消息处理失败（稍后重试）: taskId={}, msgId={}, consumer={}",
+                                    message.getTaskId(), messageId, consumerName);
                         }
                     } catch (Exception e) {
-                        log.error("[RedisStream] 消息反序列化或分发失败: msgId={}, error={}",
-                                messageId, e.getMessage(), e);
+                        log.error("[RedisStream] 消息反序列化或分发失败: msgId={}, consumer={}, error={}",
+                                messageId, consumerName, e.getMessage(), e);
                         redisTemplate.opsForStream().acknowledge(
                                 RedisStreamConfig.STREAM_KEY, RedisStreamConfig.CONSUMER_GROUP, record.getId());
                     }
                 }
             } catch (Exception e) {
                 if (running.get()) {
-                    log.error("[RedisStream] 消费者循环异常: {}", e.getMessage(), e);
-                    try { Thread.sleep(1000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                    log.error("[RedisStream] 消费者循环异常: consumer={}, error={}", consumerName, e.getMessage(), e);
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
                 }
             }
         }
+        activeConsumerCount.decrementAndGet();
+        log.info("[RedisStream] 消费者已退出: consumerName={}", consumerName);
     }
 
     private boolean dispatch(StreamMessage message) {
@@ -167,5 +195,10 @@ public class TaskConsumerRunner {
             }
         }
         return null;
+    }
+
+    /** 获取当前活跃消费者数 */
+    public int getActiveConsumerCount() {
+        return activeConsumerCount.get();
     }
 }

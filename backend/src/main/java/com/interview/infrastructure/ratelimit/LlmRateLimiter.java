@@ -2,107 +2,81 @@ package com.interview.infrastructure.ratelimit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * LLM API 调用令牌桶限流器
- *
- * 防止突发高并发导致 DashScope API 被限流(429)或 Token 费用激增。
- * 默认配置：每分钟最多 60 次调用（可根据模型调整）
- *
- * 使用方式：在调用 LLM API 之前调用 LlmRateLimiter.tryAcquire()，
- * 如果返回 false 则阻塞等待或降级。
+ * LLM 调用限流器（令牌桶算法）
+ * 限制每分钟内 LLM API 调用次数，防止突发流量耗尽 Token 配额
  */
 @Component
 public class LlmRateLimiter {
 
     private static final Logger log = LoggerFactory.getLogger(LlmRateLimiter.class);
 
-    /** 默认每分钟最大请求数 */
-    private static final int DEFAULT_MAX_RPM = 60;
+    /** 每分钟最大调用次数 */
+    private final int maxRequestsPerMinute;
 
-    /** 刷新窗口长度（毫秒） */
-    private static final long WINDOW_MS = 60_000L;
+    /** 当前时间窗口内的调用计数 */
+    private final AtomicInteger requestCount = new AtomicInteger(0);
 
-    private final int maxRequestsPerWindow;
-    private final AtomicInteger counter;
-    private final AtomicLong windowStart;
+    /** 当前窗口开始时间戳（毫秒） */
+    private final AtomicLong windowStart = new AtomicLong(System.currentTimeMillis());
 
-    public LlmRateLimiter() {
-        this(DEFAULT_MAX_RPM);
-    }
+    /** 限流触发次数统计 */
+    private final AtomicInteger rateLimitTriggered = new AtomicInteger(0);
 
-    public LlmRateLimiter(int maxRequestsPerWindow) {
-        this.maxRequestsPerWindow = maxRequestsPerWindow;
-        this.counter = new AtomicInteger(0);
-        this.windowStart = new AtomicLong(System.currentTimeMillis());
+    public LlmRateLimiter(@Value("${llm.rate-limit.max-per-minute:60}") int maxRequestsPerMinute) {
+        this.maxRequestsPerMinute = maxRequestsPerMinute;
+        log.info("[LlmRateLimiter] 初始化: maxRequestsPerMinute={}", maxRequestsPerMinute);
     }
 
     /**
-     * 尝试获取一个调用许可
+     * 尝试获取调用许可
      *
-     * @return true 允许调用，false 超过限流阈值
+     * @return true 允许调用，false 触发限流
      */
     public boolean tryAcquire() {
-        return tryAcquire(1);
-    }
-
-    /**
-     * 尝试获取多个调用许可
-     *
-     * @param permits 需要的许可数量
-     * @return true 允许调用，false 超过限流阈值
-     */
-    public boolean tryAcquire(int permits) {
         long now = System.currentTimeMillis();
         long window = windowStart.get();
 
-        // 如果当前时间已超出窗口，重置计数器
-        if (now - window > WINDOW_MS) {
-            // 原子更新窗口起始时间（只允许一个线程重置）
+        // 如果已过窗口期（超过1分钟），重置窗口
+        if (now - window > 60_000) {
             if (windowStart.compareAndSet(window, now)) {
-                counter.set(0);
+                requestCount.set(0);
             }
         }
 
-        int currentCount;
-        do {
-            currentCount = counter.get();
-            if (currentCount + permits > maxRequestsPerWindow) {
-                log.warn("[限流] LLM 调用限流触发: 当前窗口已用 {}/{}, 请求许可={}",
-                        currentCount, maxRequestsPerWindow, permits);
-                return false;
-            }
-        } while (!counter.compareAndSet(currentCount, currentCount + permits));
-
-        if (currentCount == 0 || currentCount % 10 == 0) {
-            log.info("[限流] LLM 调用量: {}/{}/分钟", currentCount + permits, maxRequestsPerWindow);
+        int count = requestCount.incrementAndGet();
+        if (count > maxRequestsPerMinute) {
+            rateLimitTriggered.incrementAndGet();
+            return false;
         }
-
         return true;
     }
 
-    /**
-     * 获取当前窗口已使用的请求数
-     */
-    public int getCurrentUsage() {
-        return counter.get();
+    /** 获取当前窗口已用次数 */
+    public int getCurrentCount() {
+        return requestCount.get();
     }
 
-    /**
-     * 获取最大窗口请求数
-     */
-    public int getMaxRequestsPerWindow() {
-        return maxRequestsPerWindow;
+    /** 获取限流触发总次数 */
+    public int getRateLimitTriggeredCount() {
+        return rateLimitTriggered.get();
     }
 
-    /**
-     * 获取当前窗口剩余许可数
-     */
-    public int getRemainingPermits() {
-        return Math.max(0, maxRequestsPerWindow - counter.get());
+    /** 获取每分钟最大调用次数 */
+    public int getMaxRequestsPerMinute() {
+        return maxRequestsPerMinute;
+    }
+
+    /** 重置限流器状态 */
+    public void reset() {
+        windowStart.set(System.currentTimeMillis());
+        requestCount.set(0);
+        rateLimitTriggered.set(0);
     }
 }

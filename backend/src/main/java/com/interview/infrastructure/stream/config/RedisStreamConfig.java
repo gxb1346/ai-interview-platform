@@ -20,6 +20,9 @@ public final class RedisStreamConfig {
     /** 消费者批量读取最大条数 */
     public static final int MAX_BATCH_SIZE = 10;
 
+    /** 并行消费者线程数（同一消费者组内多个消费者实现并行处理） */
+    public static final int CONSUMER_COUNT = 4;
+
     /** 消费者阻塞读取超时（毫秒） */
     public static final long BLOCK_TIMEOUT_MS = 5000;
 

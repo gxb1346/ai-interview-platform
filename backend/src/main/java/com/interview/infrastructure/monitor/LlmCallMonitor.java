@@ -4,136 +4,196 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * LLM 调用监控器
- *
- * 跟踪每次 LLM API 调用，帮助评估 token 消耗情况。
- * 通过查看日志可以清楚区分：哪些请求走了缓存/去重，哪些真正调用了 LLM。
- *
- * 监控维度：
- * - 总调用次数
- * - 各调用点分布（简历分析、评估、TTS、方向推荐等）
- * - 缓存命中次数
- * - 去重拦截次数
- * - 限流触发次数
+ * 统计各调用点的调用次数、Token 消耗、耗时等指标
  */
 @Component
 public class LlmCallMonitor {
 
     private static final Logger log = LoggerFactory.getLogger(LlmCallMonitor.class);
 
+    // ========== 调用点名称常量 ==========
+    public static final String RESUME_ANALYSIS = "resume_analysis";
+    public static final String FOLLOW_UP = "follow_up";
+    public static final String QUESTION_GENERATE = "question_generate";
+    public static final String DIRECTION_RECOMMEND = "direction_recommend";
+    public static final String JD_PARSE = "jd_parse";
+    public static final String BATCH_EVALUATION = "batch_evaluation";
+    public static final String AGGREGATE_EVALUATION = "aggregate_evaluation";
+
+    // ========== 全局统计 ==========
+    /** 真实 LLM 调用次数 */
     private final AtomicLong totalCalls = new AtomicLong(0);
+    /** 缓存命中次数 */
     private final AtomicLong cacheHits = new AtomicLong(0);
-    private final AtomicLong dedupSkips = new AtomicLong(0);
+    /** 限流拒绝次数 */
     private final AtomicLong rateLimitBlocks = new AtomicLong(0);
-    private final AtomicLong errors = new AtomicLong(0);
 
-    private final ConcurrentHashMap<String, AtomicInteger> callPoints = new ConcurrentHashMap<>();
+    // ========== 并发跟踪 ==========
+    private final AtomicInteger currentConcurrent = new AtomicInteger(0);
+    private final AtomicInteger peakConcurrent = new AtomicInteger(0);
 
-    private final LocalDateTime startTime = LocalDateTime.now();
+    // ========== Token 统计 ==========
+    private final AtomicLong totalPromptTokens = new AtomicLong(0);
+    private final AtomicLong totalCompletionTokens = new AtomicLong(0);
+    private final AtomicLong totalDurationMs = new AtomicLong(0);
 
-    // ======= 调用点枚举 =======
+    // ========== 按调用点统计 ==========
+    private final Map<String, CallPointStats> callPointStats = new ConcurrentHashMap<>();
 
-    public static final String RESUME_ANALYSIS = "简历分析";
-    public static final String BATCH_EVALUATION = "分批评估";
-    public static final String AGGREGATE_EVALUATION = "汇总评估";
-    public static final String TTS_SYNTHESIS = "TTS语音合成";
-    public static final String DIRECTION_RECOMMEND = "方向推荐";
-    public static final String JD_PARSE = "岗位描述解析";
-    public static final String FOLLOW_UP = "追问生成";
-    public static final String QUESTION_GENERATE = "题目生成";
+    // ========== 对外接口 ==========
 
-    /**
-     * 记录一次真实的 LLM API 调用
-     */
+    /** 记录一次真实 LLM 调用（含 Token 信息） */
+    public void recordCall(String callPoint, int promptTokens, int completionTokens, long durationMs) {
+        totalCalls.incrementAndGet();
+        totalPromptTokens.addAndGet(promptTokens);
+        totalCompletionTokens.addAndGet(completionTokens);
+        totalDurationMs.addAndGet(durationMs);
+
+        CallPointStats stats = callPointStats.computeIfAbsent(callPoint, k -> new CallPointStats());
+        stats.record(promptTokens, completionTokens, durationMs);
+    }
+
+    /** 记录一次真实 LLM 调用（不含 Token 信息，做估算用） */
     public void recordCall(String callPoint) {
         totalCalls.incrementAndGet();
-        callPoints.computeIfAbsent(callPoint, k -> new AtomicInteger(0)).incrementAndGet();
-        log.info("[LLM监控] ✅ 真实调用: {} | 累计: {} 次", callPoint, totalCalls.get());
+        CallPointStats stats = callPointStats.computeIfAbsent(callPoint, k -> new CallPointStats());
+        stats.record(0, 0, 0);
     }
 
-    /**
-     * 记录一次缓存命中（节省了 LLM 调用）
-     */
-    public void recordCacheHit(String cacheType) {
+    /** 记录一次缓存命中 */
+    public void recordCacheHit(String callPoint) {
         cacheHits.incrementAndGet();
-        log.info("[LLM监控] 🟢 缓存命中: {} | 累计节省: {} 次", cacheType, cacheHits.get());
     }
 
-    /**
-     * 记录一次去重拦截（节省了 LLM 调用）
-     */
-    public void recordDedupSkip(String dedupType) {
-        dedupSkips.incrementAndGet();
-        log.info("[LLM监控] 🔵 去重拦截: {} | 累计节省: {} 次", dedupType, dedupSkips.get());
-    }
-
-    /**
-     * 记录一次限流触发（保护了 API）
-     */
+    /** 记录一次限流触发 */
     public void recordRateLimit(String callPoint) {
         rateLimitBlocks.incrementAndGet();
-        log.warn("[LLM监控] 🔴 限流触发: {} | 累计限流: {} 次", callPoint, rateLimitBlocks.get());
     }
 
-    /**
-     * 记录一次 LLM 调用失败
-     */
-    public void recordError(String callPoint, String error) {
-        errors.incrementAndGet();
-        log.error("[LLM监控] ❌ 调用失败: {} | 原因: {} | 累计失败: {} 次", callPoint, error, errors.get());
+    /** 增加并发计数 */
+    public void incrementConcurrent() {
+        int cur = currentConcurrent.incrementAndGet();
+        int peak;
+        while (cur > (peak = peakConcurrent.get())) {
+            peakConcurrent.compareAndSet(peak, cur);
+        }
     }
 
-    /**
-     * 打印当前监控快照
-     */
+    /** 减少并发计数 */
+    public void decrementConcurrent() {
+        currentConcurrent.decrementAndGet();
+    }
+
+    // ========== 统计查询 ==========
+
+    /** 获取快照统计（Map 格式，适合 JSON 返回） */
+    public Map<String, Object> getStatsAsMap() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("totalCalls", totalCalls.get());
+        result.put("cacheHits", cacheHits.get());
+        result.put("rateLimitBlocks", rateLimitBlocks.get());
+        result.put("peakConcurrent", peakConcurrent.get());
+        result.put("totalPromptTokens", totalPromptTokens.get());
+        result.put("totalCompletionTokens", totalCompletionTokens.get());
+        result.put("totalTokens", totalPromptTokens.get() + totalCompletionTokens.get());
+        result.put("totalDurationMs", totalDurationMs.get());
+
+        double cacheRate = totalCalls.get() + cacheHits.get() > 0
+                ? (double) cacheHits.get() / (totalCalls.get() + cacheHits.get()) * 100 : 0;
+        result.put("cacheRate", String.format("%.1f%%", cacheRate));
+
+        double avgDuration = totalCalls.get() > 0 ? (double) totalDurationMs.get() / totalCalls.get() : 0;
+        result.put("avgDurationMs", String.format("%.1f", avgDuration));
+
+        // 各调用点详情
+        Map<String, Object> pointDetails = new HashMap<>();
+        for (Map.Entry<String, CallPointStats> entry : callPointStats.entrySet()) {
+            Map<String, Object> detail = new HashMap<>();
+            CallPointStats s = entry.getValue();
+            detail.put("count", s.count.get());
+            detail.put("promptTokens", s.promptTokens.get());
+            detail.put("completionTokens", s.completionTokens.get());
+            detail.put("totalTokens", s.promptTokens.get() + s.completionTokens.get());
+            detail.put("totalDurationMs", s.totalDurationMs.get());
+            detail.put("avgDurationMs", s.count.get() > 0 ?
+                    String.format("%.1f", (double) s.totalDurationMs.get() / s.count.get()) : "0");
+            pointDetails.put(entry.getKey(), detail);
+        }
+        result.put("callPointDetails", pointDetails);
+
+        return result;
+    }
+
+    /** 获取格式化的文本快照报告 */
     public String getSnapshot() {
         StringBuilder sb = new StringBuilder();
-        String separator = "=" .repeat(50);
-        sb.append('\n').append(separator).append('\n');
+        sb.append("========================================================\n");
         sb.append("  LLM 调用监控报告\n");
-        sb.append("  启动时间: ").append(startTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))).append('\n');
-        sb.append("  当前时间: ").append(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))).append('\n');
-        sb.append(separator).append('\n');
-        sb.append(String.format("  ✅ 真实 LLM 调用:  %d 次 (消费 Token)\n", totalCalls.get()));
-        sb.append(String.format("  🟢 缓存命中:       %d 次 (节省 Token)\n", cacheHits.get()));
-        sb.append(String.format("  🔵 去重拦截:       %d 次 (节省 Token)\n", dedupSkips.get()));
-        sb.append(String.format("  🔴 限流触发:       %d 次 (保护 API)\n", rateLimitBlocks.get()));
-        sb.append(String.format("  ❌ 调用失败:       %d 次\n", errors.get()));
-        sb.append(separator).append('\n');
-        sb.append("  各调用点分布:\n");
-        callPoints.forEach((point, count) ->
-                sb.append(String.format("    %-12s: %d 次\n", point, count.get()))
-        );
-        sb.append(separator).append('\n');
+        sb.append("========================================================\n\n");
 
-        long saved = cacheHits.get() + dedupSkips.get();
-        long actual = totalCalls.get();
+        sb.append("  真实调用:     ").append(totalCalls.get()).append(" 次\n");
+        sb.append("  缓存命中:     ").append(cacheHits.get()).append(" 次\n");
+        sb.append("  限流拒绝:     ").append(rateLimitBlocks.get()).append(" 次\n");
+        sb.append("  并行峰值:     ").append(peakConcurrent.get()).append(" 线程\n\n");
 
-        if (totalCalls.get() > 0 || saved > 0) {
-            double saveRate = (double) saved / (saved + actual) * 100;
-            sb.append(String.format("  Token 节省率: %.1f%% (节省 %d 次 / 总共避免 %d 次调用)\n",
-                    saveRate, saved, saved + actual));
+        sb.append("  --- Token 消耗 ---\n");
+        sb.append("  Prompt Token:     ").append(totalPromptTokens.get()).append("\n");
+        sb.append("  Completion Token: ").append(totalCompletionTokens.get()).append("\n");
+        sb.append("  合计:             ").append(totalPromptTokens.get() + totalCompletionTokens.get()).append("\n\n");
+
+        sb.append("  --- 性能指标 ---\n");
+        long totalTime = totalDurationMs.get();
+        sb.append("  总耗时:   ").append(totalTime).append(" ms")
+                .append(" (").append(String.format("%.1f", totalTime / 1000.0)).append(" s)\n");
+        double avgDuration = totalCalls.get() > 0 ? (double) totalDurationMs.get() / totalCalls.get() : 0;
+        sb.append("  平均耗时: ").append(String.format("%.1f", avgDuration)).append(" ms/次\n");
+        double tps = totalTime > 0 ? (double) totalCalls.get() / totalTime * 1000 : 0;
+        sb.append("  TPS:      ").append(String.format("%.2f", tps)).append("\n\n");
+
+        sb.append("  --- 各调用点详情 ---\n");
+        if (callPointStats.isEmpty()) {
+            sb.append("  (暂无数据)\n");
+        } else {
+            sb.append(String.format("  %-25s %6s %8s %8s %10s %10s\n",
+                    "名称", "次数", "Prompt", "Completion", "合计Token", "平均耗时"));
+            sb.append("  ").append("-".repeat(75)).append("\n");
+            for (Map.Entry<String, CallPointStats> entry : callPointStats.entrySet()) {
+                CallPointStats s = entry.getValue();
+                long tok = s.promptTokens.get() + s.completionTokens.get();
+                double avg = s.count.get() > 0 ? (double) s.totalDurationMs.get() / s.count.get() : 0;
+                sb.append(String.format("  %-25s %6d %8d %8d %10d %10.1fms\n",
+                        entry.getKey(), s.count.get(), s.promptTokens.get(),
+                        s.completionTokens.get(), tok, avg));
+            }
         }
 
-        if (rateLimitBlocks.get() > 0) {
-            sb.append(String.format("  ⚠️  限流率: %.1f%%\n",
-                    (double) rateLimitBlocks.get() / (totalCalls.get() + rateLimitBlocks.get()) * 100));
-        }
-
-        sb.append(separator).append('\n');
+        sb.append("\n========================================================");
         return sb.toString();
     }
 
-    public long getTotalCalls() { return totalCalls.get(); }
-    public long getCacheHits() { return cacheHits.get(); }
-    public long getDedupSkips() { return dedupSkips.get(); }
-    public long getRateLimitBlocks() { return rateLimitBlocks.get(); }
-    public long getSavedCalls() { return cacheHits.get() + dedupSkips.get(); }
+    // ========== 内部统计类 ==========
+
+    static class CallPointStats {
+        private final AtomicLong count = new AtomicLong(0);
+        private final AtomicLong promptTokens = new AtomicLong(0);
+        private final AtomicLong completionTokens = new AtomicLong(0);
+        private final AtomicLong totalDurationMs = new AtomicLong(0);
+
+        void record(int promptTks, int completionTks, long durationMs) {
+            count.incrementAndGet();
+            promptTokens.addAndGet(promptTks);
+            completionTokens.addAndGet(completionTks);
+            totalDurationMs.addAndGet(durationMs);
+        }
+    }
 }
