@@ -3,7 +3,10 @@ package com.interview.modules.knowledge.controller;
 import com.interview.modules.knowledge.model.KnowledgeDocument;
 import com.interview.modules.knowledge.repository.KnowledgeDocumentRepository;
 import com.interview.modules.knowledge.service.DocumentProcessService;
+import com.interview.modules.knowledge.service.DocumentProcessService.DuplicateDocumentException;
 import com.interview.modules.knowledge.service.KnowledgeQAService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +21,8 @@ import java.util.concurrent.Executors;
 @RestController
 @RequestMapping("/api/knowledge")
 public class KnowledgeController {
+
+    private static final Logger log = LoggerFactory.getLogger(KnowledgeController.class);
 
     private final DocumentProcessService documentProcessService;
     private final KnowledgeQAService knowledgeQAService;
@@ -70,6 +75,8 @@ public class KnowledgeController {
             return ResponseEntity.ok(doc);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
+        } catch (DuplicateDocumentException e) {
+            return ResponseEntity.status(409).body(null);
         }
     }
 
@@ -161,16 +168,17 @@ public class KnowledgeController {
                                                 .name("token")
                                                 .data(token));
                                     } catch (Exception e) {
-                                        emitter.completeWithError(e);
+                                        emitter.complete();
                                     }
                                 },
                                 error -> {
+                                    log.error("SSE 流式回答出错: {}", error.getMessage(), error);
                                     try {
                                         emitter.send(SseEmitter.event()
                                                 .name("error")
-                                                .data(error.getMessage()));
+                                                .data(error.getMessage() != null ? error.getMessage() : "AI回答出错"));
                                     } catch (Exception ignored) {}
-                                    emitter.completeWithError(error);
+                                    emitter.complete();
                                 },
                                 () -> {
                                     try {
@@ -182,7 +190,13 @@ public class KnowledgeController {
                                 }
                         );
             } catch (Exception e) {
-                emitter.completeWithError(e);
+                log.error("SSE 流式回答初始化失败: {}", e.getMessage(), e);
+                try {
+                    emitter.send(SseEmitter.event()
+                            .name("error")
+                            .data(e.getMessage() != null ? e.getMessage() : "AI回答初始化失败"));
+                } catch (Exception ignored) {}
+                emitter.complete();
             }
         });
 

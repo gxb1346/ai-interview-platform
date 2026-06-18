@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  MessageSquare, Send, Loader2, BookOpen, CheckSquare, Square,
-  Database, Sparkles, ArrowLeft, ChevronDown, ChevronRight,
-  FileText, Search, X
+  Send, Loader2, BookOpen, CheckSquare, Square,
+  Sparkles, ArrowLeft, FileText
 } from "lucide-react";
 import { KnowledgeDocument } from "../types";
 
@@ -76,49 +75,64 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
     setThinking(true);
     setStreamingText("");
 
-    // 构建 SSE URL
-    const docParam = selectedIds.size > 0
-      ? `&documentIds=${Array.from(selectedIds).join(",")}`
-      : "";
-    const url = `${API_BASE}/api/knowledge/qa/stream?question=${encodeURIComponent(userMsg.content)}${docParam}`;
+    let fullAnswer = "";
+    let receivedDone = false;
 
     try {
-      // 使用 EventSource 接收 SSE
-      const eventSource = new EventSource(url);
+      console.log("[KnowledgeQA] 开始 SSE 请求...");
+      // 使用 fetch + ReadableStream 手动解析 SSE 流（SSE 端点已在后端放行）
+      const docParam = selectedIds.size > 0
+        ? `&documentIds=${Array.from(selectedIds).join(",")}`
+        : "";
+      const url = `${API_BASE}/api/knowledge/qa/stream?question=${encodeURIComponent(userMsg.content)}${docParam}`;
+      console.log("[KnowledgeQA] URL:", url);
 
-      let fullAnswer = "";
+      const response = await fetch(url);
+      console.log("[KnowledgeQA] 响应状态:", response.status);
+      if (!response.ok) throw new Error(`SSE 连接失败 (${response.status})`);
 
-      eventSource.addEventListener("token", (event) => {
-        fullAnswer += event.data;
-        setStreamingText(fullAnswer);
-      });
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      eventSource.addEventListener("done", () => {
-        setMessages(prev => [...prev, { role: "assistant", content: fullAnswer }]);
-        setStreamingText("");
-        setThinking(false);
-        eventSource.close();
-      });
-
-      eventSource.addEventListener("error", (event) => {
-        // SSE 错误处理
-        if (fullAnswer) {
-          setMessages(prev => [...prev, { role: "assistant", content: fullAnswer }]);
-        } else {
-          setMessages(prev => [...prev, {
-            role: "assistant",
-            content: "抱歉，AI 回答时出现错误，请稍后重试。"
-          }]);
+      const processLines = (lines: string[]) => {
+        let eventType = "";
+        let data = "";
+        for (const line of lines) {
+          if (line.startsWith("event:")) {
+            eventType = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            data = line.slice(5).trim();
+          } else if (line === "") {
+            if (eventType === "token") {
+              fullAnswer += data;
+              setStreamingText(fullAnswer);
+            } else if (eventType === "done") {
+              receivedDone = true;
+              setMessages(prev => [...prev, { role: "assistant", content: fullAnswer }]);
+              setStreamingText("");
+              setThinking(false);
+            } else if (eventType === "error") {
+              if (fullAnswer) {
+                setMessages(prev => [...prev, { role: "assistant", content: fullAnswer }]);
+              } else {
+                setMessages(prev => [...prev, {
+                  role: "assistant",
+                  content: "抱歉，AI 回答时出现错误，请稍后重试。"
+                }]);
+              }
+              setStreamingText("");
+              setThinking(false);
+            }
+            eventType = "";
+            data = "";
+          }
         }
-        setStreamingText("");
-        setThinking(false);
-        eventSource.close();
-      });
+      };
 
-      // 清理函数
       abortRef.current = new AbortController();
       abortRef.current.signal.addEventListener("abort", () => {
-        eventSource.close();
+        reader.cancel();
         if (fullAnswer) {
           setMessages(prev => [...prev, { role: "assistant", content: fullAnswer }]);
         }
@@ -126,12 +140,32 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
         setThinking(false);
       });
 
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (buffer.trim()) processLines(buffer.split("\n"));
+          if (!receivedDone && fullAnswer) {
+            setMessages(prev => [...prev, { role: "assistant", content: fullAnswer }]);
+            setStreamingText("");
+            setThinking(false);
+          }
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        processLines(lines);
+      }
+
     } catch (err) {
-      console.error("SSE 连接失败:", err);
-      setMessages(prev => [...prev, {
-        role: "assistant",
-        content: "抱歉，连接问答服务失败，请确认后端服务已启动。"
-      }]);
+      console.error("[KnowledgeQA] SSE 错误:", err);
+      if (!receivedDone) {
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: fullAnswer || `SSE 连接失败: ${err instanceof Error ? err.message : err}`
+        }]);
+      }
+      setStreamingText("");
       setThinking(false);
     }
   };

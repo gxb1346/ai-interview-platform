@@ -87,11 +87,11 @@ public class InterviewSessionRepository {
     }
     
     /**
-     * 查询候选人所有进行中的会话（用于续面）
+     * 查询候选人所有进行中或暂停中的会话（用于续面）
      */
     public List<InterviewSession> findActiveByCandidateId(String candidateId) {
         return findByCandidateId(candidateId).stream()
-                .filter(s -> "IN_PROGRESS".equals(s.getStatus()))
+                .filter(s -> "IN_PROGRESS".equals(s.getStatus()) || "PAUSED".equals(s.getStatus()))
                 .collect(Collectors.toList());
     }
 

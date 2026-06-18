@@ -39,6 +39,37 @@ import ResumeManageView from "./components/ResumeManageView";
 import KnowledgeBaseView from "./components/KnowledgeBaseView";
 import KnowledgeQAView from "./components/KnowledgeQAView";
 
+// Auth
+import LoginView from "./components/LoginView";
+import { isAuthenticated, clearToken, getStoredUser, authFetch, getToken } from "./api";
+
+// 全局 fetch 拦截：自动为后端 Java API 请求添加 JWT Authorization 头
+{
+  const origFetch = window.fetch.bind(window);
+  window.fetch = function(input: RequestInfo | URL, init?: RequestInit) {
+    const token = getToken();
+    if (token) {
+      const headers: Record<string, string> = {};
+      if (init?.headers) {
+        if (init.headers instanceof Headers) {
+          init.headers.forEach((value, key) => { headers[key] = value; });
+        } else if (Array.isArray(init.headers)) {
+          init.headers.forEach(([key, value]) => { headers[key] = value; });
+        } else {
+          Object.assign(headers, init.headers as Record<string, string>);
+        }
+      }
+      // 只对 Java 后端请求添加 Authorization（含 localhost:8082 的请求）
+      const urlStr = typeof input === "string" ? input : (input instanceof URL ? input.href : input.url);
+      if (urlStr.includes("localhost:8082")) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      return origFetch(input, { ...init, headers });
+    }
+    return origFetch(input, init);
+  };
+}
+
 type ActiveView =
   | "RESUME_ANALYSIS"
   | "RESUME_MANAGE"
@@ -67,6 +98,8 @@ function saveToStorage<T>(key: string, data: T) {
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ActiveView>("RESUME_ANALYSIS");
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
   
   // 启动时清除可能残留的旧 localStorage 数据（避免已移除人才库的候选人仍出现）
   try { localStorage.removeItem("recruit_candidates"); } catch {}
@@ -143,7 +176,7 @@ export default function App() {
       const allSessions: InterviewSession[] = [];
       for (const cId of candidateIds.slice(0, 20)) { // 限制最多查询20个候选人
         try {
-          const res = await fetch(`${API_BASE}/api/mock-interview/candidates/${cId}/sessions`);
+          const res = await authFetch(`${API_BASE}/api/mock-interview/candidates/${cId}/sessions`);
           const sessions = await res.json();
           if (Array.isArray(sessions)) allSessions.push(...sessions);
         } catch {}
@@ -189,6 +222,17 @@ export default function App() {
     });
   };
 
+  // 登录成功回调
+  const handleLoginSuccess = () => {
+    setLoggedIn(true);
+  };
+
+  // 退出登录
+  const handleLogout = () => {
+    clearToken();
+    setLoggedIn(false);
+  };
+
   // Switch View name label maps
   const getViewTitle = () => {
     switch (currentView) {
@@ -214,6 +258,37 @@ export default function App() {
         return "系统仪表盘";
     }
   };
+
+  // 启动时验证 Token 是否有效
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      setAuthChecking(false);
+      return;
+    }
+    // 调用 /api/auth/me 验证 token 是否仍然有效
+    fetch(`${API_BASE}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => {
+        if (res.ok) setLoggedIn(true);
+        else clearToken();
+      })
+      .catch(() => clearToken())
+      .finally(() => setAuthChecking(false));
+  }, []);
+
+  // 校验中显示加载中（登录页），校验完毕后才决定显示什么
+  if (authChecking) {
+    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // 未登录 → 显示登录页
+  if (!loggedIn) {
+    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  const authUser = getStoredUser();
 
   return (
     <div className="min-h-screen bg-[#F5F7FA] text-slate-800 flex flex-col font-sans selection:bg-primary/10 select-none">
@@ -279,20 +354,25 @@ export default function App() {
           {/* User profile bottom corner */}
           <div className="border-t border-slate-200 pt-4 mt-6">
             <div className="flex items-center gap-3 group">
-              <img
-                src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&h=150&fit=crop&crop=face"
-                alt="user avatar"
-                referrerPolicy="no-referrer"
-                className="w-9 h-9 rounded-full object-cover border-2 border-slate-100 shadow-sm"
-              />
+              {/* 头像：取 displayName 首字符 */}
+              <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center text-white text-sm font-bold shadow-sm shrink-0">
+                {authUser?.displayName?.charAt(0)?.toUpperCase() || "U"}
+              </div>
               <div className="flex-1 min-w-0">
                 <span className="text-xs font-bold text-slate-800 block truncate font-sans">
-                  AI招聘组长
+                  {authUser?.displayName || authUser?.username || "用户"}
                 </span>
                 <span className="text-[9px] text-slate-400 block truncate font-mono">
-                  guo99039@gmail.com
+                  {authUser?.username || ""}
                 </span>
               </div>
+              <button
+                onClick={handleLogout}
+                title="退出登录"
+                className="w-7 h-7 rounded-lg hover:bg-red-50 hover:text-red-500 flex items-center justify-center text-slate-400 transition cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
         </aside>
@@ -340,7 +420,7 @@ export default function App() {
                   AI招聘协作
                 </span>
                 <span className="text-xs font-bold text-slate-700 font-sans">
-                  Guo
+                  {authUser?.displayName || authUser?.username || "Guo"}
                 </span>
               </div>
             </div>

@@ -13,6 +13,7 @@ import {
   CheckCircle2, ChevronRight, Play, Check, File, X, Loader2, Layers
 } from "lucide-react";
 import { Candidate, CandidateStatus } from "../types";
+import { getToken } from "../api";
 
 // Java 后端 API 地址
 const API_BASE = "http://localhost:8082";
@@ -119,6 +120,7 @@ export default function ResumeAnalysisView({
 
       const response = await fetch(`${API_BASE}/api/resume/upload`, {
         method: "POST",
+        headers: getToken() ? { "Authorization": `Bearer ${getToken()}` } : undefined,
         body: formData,
       });
 
@@ -165,7 +167,10 @@ export default function ResumeAnalysisView({
 
       // 自动将新简历移入人才库
       if (data.id) {
-        fetch(`${API_BASE}/api/resume/${data.id}/to-talent-pool`, { method: "POST" }).catch(() => {});
+        fetch(`${API_BASE}/api/resume/${data.id}/to-talent-pool`, {
+          method: "POST",
+          headers: getToken() ? { "Authorization": `Bearer ${getToken()}` } : undefined,
+        }).catch(() => {});
       }
 
       // 延迟展示，让进度条走完
@@ -248,6 +253,7 @@ export default function ResumeAnalysisView({
 
       const response = await fetch(`${API_BASE}/api/resume/upload/batch`, {
         method: "POST",
+        headers: getToken() ? { "Authorization": `Bearer ${getToken()}` } : undefined,
         body: formData,
       });
 

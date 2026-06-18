@@ -427,9 +427,12 @@ public class MockInterviewService {
         InterviewSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
 
-        if (!"IN_PROGRESS".equals(session.getStatus())) {
-            throw new RuntimeException("只能恢复进行中的面试会话");
+        if (!"IN_PROGRESS".equals(session.getStatus()) && !"PAUSED".equals(session.getStatus())) {
+            throw new RuntimeException("只能恢复进行中或暂停中的面试会话");
         }
+
+        // 恢复时确保状态为 IN_PROGRESS
+        session.setStatus("IN_PROGRESS");
 
         InterviewMessage resumeMsg = new InterviewMessage(
                 UUID.randomUUID().toString(),

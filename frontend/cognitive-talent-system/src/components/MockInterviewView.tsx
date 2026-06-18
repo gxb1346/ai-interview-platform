@@ -237,6 +237,9 @@ export default function MockInterviewView({
   const pcmBufferRef = useRef<Int16Array[]>([]);
   const pcmFlushTimerRef = useRef<number | null>(null);
   const wsConnectedRef = useRef(false);
+  // 累积的 ASR 最终文本（避免闭包陈旧问题）
+  const asrAccumulatedRef = useRef("");
+  const asrBaseTextRef = useRef("");
 
   // 麦克风设备选择
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
@@ -294,6 +297,11 @@ export default function MockInterviewView({
 
       setSessionId(data.sessionId);
       setInterviewStarted(true);
+
+      // 恢复面试模式（语音/文字）
+      if (data.mode) {
+        setInterviewMode(data.mode as "text" | "voice");
+      }
 
       const initialMessages = (data.messages && Array.isArray(data.messages))
         ? data.messages.map((m: any) => ({
@@ -506,6 +514,10 @@ export default function MockInterviewView({
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || thinking || !sessionId) return;
+    // 提交时自动停止录音
+    if (isRecording) {
+      stopVoiceRecording();
+    }
     const userMsg: ChatMessage = {
       id: "user_" + Date.now(), sender: "candidate", text: inputText,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -730,6 +742,9 @@ export default function MockInterviewView({
   // 语音 - 始终使用 WebSocket 实时 ASR
   const toggleVoiceRecording = () => {
     if (isRecording) { stopVoiceRecording(); return; }
+    // 保存当前输入框文本作为基础文本（确保键盘输入不会被覆盖）
+    asrBaseTextRef.current = inputText;
+    asrAccumulatedRef.current = "";
 
     // 直接使用 WebSocket 实时 ASR（绕过浏览器原生 SpeechRecognition，
     // 因为原生 API 依赖 Google 服务，且不可控制格式和模型）
@@ -793,7 +808,7 @@ export default function MockInterviewView({
           processor.connect(silentGain);
           silentGain.connect(audioCtx.destination);
 
-          // 每 500ms 刷新一次 PCM 缓冲区到 WebSocket
+          // 每 200ms 刷新一次 PCM 缓冲区到 WebSocket（较短的间隔让 ASR 更快返回中间结果）
           const flushTimer = window.setInterval(() => {
             if (pcmBufferRef.current.length === 0 || !wsConnectedRef.current) return;
             const chunks = pcmBufferRef.current.splice(0);
@@ -806,7 +821,7 @@ export default function MockInterviewView({
             }
             // 发送 PCM 二进制数据
             ws.send(merged.buffer);
-          }, 500);
+          }, 200);
           pcmFlushTimerRef.current = flushTimer;
 
           setIsRecording(true);
@@ -825,23 +840,25 @@ export default function MockInterviewView({
           if (data.type === "transcript" && data.text) {
             const correctedText = correctAsrText(data.text);
             if (data.isFinal) {
+              // 最终结果：累积到 accumulatedRef 并更新输入框
+              asrAccumulatedRef.current += correctedText;
+              setInputText(asrBaseTextRef.current + asrAccumulatedRef.current);
+              setInterimText("🎤 录音中...");
+
               // 语音指令检测：结束面试
               const lowerText = correctedText.toLowerCase();
               if (/(结束面试|生成报告|结束吧|到此为止|交卷|可以了|评估报告)/.test(lowerText)) {
-                setInputText(correctedText);
-                setInterimText("");
-                // 延迟一下确保 input 已更新，然后提交
+                stopTimeoutTimer();
                 setTimeout(() => {
                   if (sessionId) {
-                    // 模拟点击结束面试
                     handleEndInterview();
                   }
                 }, 500);
                 return;
               }
-              setInputText(p => p + correctedText);
-              setInterimText("");
             } else {
+              // 中间结果：实时显示在输入框中（累积文本 + 当前中间结果）
+              setInputText(asrBaseTextRef.current + asrAccumulatedRef.current + correctedText);
               setInterimText(correctedText);
             }
           } else if (data.type === "error") {
@@ -849,7 +866,7 @@ export default function MockInterviewView({
             setInterimText("⚠️ " + (data.message || "识别错误"));
           } else if (data.type === "complete") {
             console.log("[ASR WS] 识别完成");
-            setInterimText("");
+            setInterimText("🎤 录音中...");
           } else if (data.type === "ready") {
             console.log("[ASR WS] 就绪:", data.message);
           }
@@ -931,6 +948,11 @@ export default function MockInterviewView({
     }
     wsConnectedRef.current = false;
     pcmBufferRef.current = [];
+    // 停止录音时，确保累积的 ASR 最终文本写入输入框
+    if (asrAccumulatedRef.current) {
+      setInputText(asrBaseTextRef.current + asrAccumulatedRef.current);
+    }
+    asrAccumulatedRef.current = "";
     setIsRecording(false);
     setInterimText("");
   };
@@ -1228,7 +1250,7 @@ export default function MockInterviewView({
                       {isRecording ? <MicOff className="w-4.5 h-4.5" /> : <Mic className="w-4.5 h-4.5" />}
                     </button>
                   )}
-                  <input type="text" disabled={thinking} value={inputText}
+                  <input type="text" value={inputText}
                     onChange={e => { setInputText(e.target.value); stopTimeoutTimer(); }}
                     placeholder={isRecording ? "正在录音..." : isPaused ? "面试已暂停" : "请输入您的回答..."}
                     className="flex-1 text-xs py-3 px-4 bg-slate-50 rounded-xl border border-slate-200 focus:border-primary outline-none transition disabled:opacity-50"
@@ -1238,8 +1260,8 @@ export default function MockInterviewView({
                     <Send className="w-4.5 h-4.5" />
                   </button>
                 </div>
-                {isRecording && interimText && (
-                  <div className="text-[10px] text-slate-400 italic mt-2">🎤 {interimText}</div>
+                {isRecording && (
+                  <div className="text-[10px] text-slate-400 italic mt-2">🎤 录音中，实时语音将显示在上方输入框中</div>
                 )}
               </form>
             </div>

@@ -73,6 +73,9 @@ spring:
 app:
   cors:
     allowed-origins: http://localhost:3000,http://localhost:5173
+  jwt:
+    secret: RecruitAI-JWT-Secret-Key-2026-Must-Be-At-Least-256-Bits-Long!!
+    expiration-ms: 86400000
   storage:
     endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
     access-key: ${STORAGE_ACCESS_KEY:minioadmin}

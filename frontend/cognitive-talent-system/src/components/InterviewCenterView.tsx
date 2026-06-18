@@ -5,6 +5,7 @@ import {
   MessageSquareCode, FileText, CheckCircle, XCircle, Mic
 } from "lucide-react";
 import { Candidate, Interview, ResumeVO, ApiResult, InterviewSession, EvaluationReport, STAGE_LABELS } from "../types";
+import { authFetch } from "../api";
 
 const API_BASE = "http://localhost:8082";
 
@@ -62,7 +63,7 @@ export default function InterviewCenterView({
   const [reports, setReports] = useState<Record<string, EvaluationReport>>({});
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/resume/talent-pool`)
+    authFetch(`${API_BASE}/api/resume/talent-pool`)
       .then(res => res.json())
       .then((json: ApiResult<ResumeVO[]>) => {
         if (json.code === 200 && json.data) setTalentCandidates(json.data.map(toCandidate));
@@ -133,7 +134,7 @@ export default function InterviewCenterView({
     if (reports[sessionId]) { setExpandedSessionId(expandedSessionId === sessionId ? null : sessionId); return; }
     setLoadingReports(prev => ({ ...prev, [sessionId]: true }));
     try {
-      const res = await fetch(`${API_BASE}/api/evaluation/sessions/${sessionId}`, { method: "POST" });
+      const res = await authFetch(`${API_BASE}/api/evaluation/sessions/${sessionId}`, { method: "POST" });
       const report = await res.json();
       setReports(prev => ({ ...prev, [sessionId]: report }));
       setExpandedSessionId(sessionId);

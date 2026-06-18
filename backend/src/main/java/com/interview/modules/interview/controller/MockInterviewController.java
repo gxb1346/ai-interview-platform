@@ -119,6 +119,7 @@ public class MockInterviewController {
             )).toList());
             response.put("currentStage", session.getCurrentStage());
             response.put("currentRound", session.getCurrentRound());
+            response.put("mode", session.getMode());
             response.put("messages", session.getMessages());
             return ResponseEntity.ok(response);
         } catch (RuntimeException e) {
