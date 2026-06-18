@@ -116,7 +116,14 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler {
         responseData.put("sessionId", sessionId);
         responseData.put("reply", reply);
         responseData.put("currentRound", interviewSession.getCurrentRound());
+        responseData.put("currentQuestionIndex", interviewSession.getCurrentQuestionIndex());
+        responseData.put("totalQuestions", interviewSession.getQuestions() == null ? 0 : interviewSession.getQuestions().size());
         responseData.put("status", interviewSession.getStatus());
+
+        // 标记是否需要自动触发评估
+        if ("COMPLETED".equals(interviewSession.getStatus())) {
+            responseData.put("needsEvaluation", true);
+        }
 
         // 语音面试模式下，同步生成语音回复
         String audioBase64 = audioService.textToSpeechBase64(reply);

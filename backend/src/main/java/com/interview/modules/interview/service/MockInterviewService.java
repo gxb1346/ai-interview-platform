@@ -287,7 +287,10 @@ public class MockInterviewService {
         return t.equals("没有了") || t.equals("没有") || t.equals("暂时没有")
             || t.contains("没有问题了") || t.contains("没问题了")
             || t.equals("结束") || t.equals("不问了")
-            || t.contains("就到这里") || t.contains("没有其他");
+            || t.contains("就到这里") || t.contains("没有其他")
+            || t.contains("结束面试") || t.contains("生成报告") || t.contains("评估报告")
+            || t.contains("结束吧") || t.contains("可以了") || t.contains("到此为止")
+            || t.contains("交卷") || t.contains("就这些") || t.contains("完成了");
     }
 
     private String getFallbackTransition(InterviewQuestion nextQ, String stage, int questionNumber) {
@@ -450,6 +453,34 @@ public class MockInterviewService {
                 .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
         session.setStatus("COMPLETED");
         session.setCompletedAt(java.time.LocalDateTime.now());
+        sessionRepository.save(session);
+        return session;
+    }
+
+    /**
+     * 暂停面试
+     */
+    public InterviewSession pauseSession(String sessionId) {
+        InterviewSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
+        if (!"IN_PROGRESS".equals(session.getStatus())) {
+            throw new RuntimeException("只能暂停进行中的面试");
+        }
+        session.setStatus("PAUSED");
+        sessionRepository.save(session);
+        return session;
+    }
+
+    /**
+     * 恢复暂停的面试
+     */
+    public InterviewSession unpauseSession(String sessionId) {
+        InterviewSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
+        if (!"PAUSED".equals(session.getStatus())) {
+            throw new RuntimeException("只能恢复已暂停的面试");
+        }
+        session.setStatus("IN_PROGRESS");
         sessionRepository.save(session);
         return session;
     }

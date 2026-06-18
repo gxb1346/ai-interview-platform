@@ -43,6 +43,13 @@ public class EvaluationController {
         // 面试完成后自动异步生成 PDF
         pdfExportService.exportReport(report);
 
+        // 评估后自动将会话标记为已完成（移出未完成面试列表）
+        try {
+            interviewService.endInterview(sessionId);
+        } catch (Exception ignored) {
+            // 已完成的会话不报错
+        }
+
         return ResponseEntity.ok(report);
     }
 

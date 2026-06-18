@@ -139,6 +139,38 @@ public class MockInterviewController {
     }
 
     /**
+     * 暂停面试
+     */
+    @PostMapping("/sessions/{sessionId}/pause")
+    public ResponseEntity<Map<String, String>> pauseInterview(@PathVariable String sessionId) {
+        try {
+            InterviewSession session = interviewService.pauseSession(sessionId);
+            return ResponseEntity.ok(Map.of(
+                    "sessionId", session.getSessionId(),
+                    "status", session.getStatus()
+            ));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * 恢复暂停的面试
+     */
+    @PostMapping("/sessions/{sessionId}/unpause")
+    public ResponseEntity<Map<String, String>> unpauseInterview(@PathVariable String sessionId) {
+        try {
+            InterviewSession session = interviewService.unpauseSession(sessionId);
+            return ResponseEntity.ok(Map.of(
+                    "sessionId", session.getSessionId(),
+                    "status", session.getStatus()
+            ));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
      * 获取面试会话详情
      */
     @GetMapping("/sessions/{sessionId}")

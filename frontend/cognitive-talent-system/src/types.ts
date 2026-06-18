@@ -183,7 +183,7 @@ export interface InterviewSession {
   totalDuration: number;
   stageConfig: StageConfig;
   followUpCount: number;
-  status: "PREPARING" | "IN_PROGRESS" | "COMPLETED" | "TERMINATED";
+  status: "PREPARING" | "IN_PROGRESS" | "COMPLETED" | "TERMINATED" | "PAUSED";
   customJD: string;
   questions: InterviewQuestion[];
   messages: InterviewMessage[];
@@ -235,6 +235,8 @@ export interface StartInterviewResponse {
 export interface ChatResponse {
   reply: string;
   currentRound: number;
+  currentQuestionIndex?: number;
+  totalQuestions?: number;
   currentStage: string;
   status: string;
   /** 语音面试时，后端返回 base64 编码的 TTS 音频数据 */

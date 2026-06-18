@@ -55,8 +55,11 @@ public class InterviewSessionRepository {
      */
     public Optional<InterviewSession> findById(String sessionId) {
         try {
-            String json = redisTemplate.opsForValue().get(sessionKey(sessionId));
+            String sessionKey = sessionKey(sessionId);
+            String json = redisTemplate.opsForValue().get(sessionKey);
             if (json == null) return Optional.empty();
+            // 访问时续期 TTL，避免活跃会话过期
+            redisTemplate.expire(sessionKey, SESSION_TTL_HOURS, TimeUnit.HOURS);
             InterviewSession session = objectMapper.readValue(json, InterviewSession.class);
             return Optional.of(session);
         } catch (Exception e) {

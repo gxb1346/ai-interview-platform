@@ -215,6 +215,11 @@ export default function MockInterviewView({
   const [timeoutRemaining, setTimeoutRemaining] = useState<number>(0);
   const timeoutTimerRef = useRef<number | null>(null);
 
+  // 面试暂停
+  const [isPaused, setIsPaused] = useState(false);
+  const pausedTimeRef = useRef<number>(0);
+  const pauseResumeLoading = useRef(false);
+
   // 语音
   const [isRecording, setIsRecording] = useState(false);
   const [interimText, setInterimText] = useState("");
@@ -590,6 +595,10 @@ export default function MockInterviewView({
       };
       setScoreCard(card);
       onSaveScoreCard(card);
+      // 评估完成后刷新活跃会话列表
+      if (activeCandidateId) {
+        fetchActiveSessions(activeCandidateId);
+      }
     } catch {
       const fallback: ScoreCard = {
         id: "sc_fb_" + Date.now(), candidateId: activeCand?.id || "", candidateName: activeCand?.name || "",
@@ -605,9 +614,43 @@ export default function MockInterviewView({
 
   const handleEndInterview = async () => {
     if (!sessionId) return;
+    stopTimeoutTimer();
     if (timerInterval) { clearInterval(timerInterval); setTimerInterval(null); }
     handleEvaluate(sessionId);
   };
+
+  // 暂停面试
+  const handlePause = useCallback(async () => {
+    if (!sessionId || pauseResumeLoading.current) return;
+    pauseResumeLoading.current = true;
+    try {
+      await fetch(`${API_BASE}/api/mock-interview/sessions/${sessionId}/pause`, { method: "POST" });
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        setTimerInterval(null);
+      }
+      pausedTimeRef.current = timeElapsed;
+      stopTimeoutTimer();
+      setIsPaused(true);
+    } catch {
+      console.error("暂停面试失败");
+    } finally { pauseResumeLoading.current = false; }
+  }, [sessionId, timerInterval, timeElapsed]);
+
+  // 继续面试
+  const handleResume = useCallback(async () => {
+    if (!sessionId || pauseResumeLoading.current) return;
+    pauseResumeLoading.current = true;
+    try {
+      await fetch(`${API_BASE}/api/mock-interview/sessions/${sessionId}/unpause`, { method: "POST" });
+      setIsPaused(false);
+      // 重新启动计时器
+      const interval = setInterval(() => setTimeElapsed(p => p + 1), 1000);
+      setTimerInterval(interval);
+    } catch {
+      console.error("恢复面试失败");
+    } finally { pauseResumeLoading.current = false; }
+  }, [sessionId]);
 
   const formatTimer = (secs: number) => {
     const m = Math.floor(secs / 60), s = secs % 60;
@@ -782,6 +825,20 @@ export default function MockInterviewView({
           if (data.type === "transcript" && data.text) {
             const correctedText = correctAsrText(data.text);
             if (data.isFinal) {
+              // 语音指令检测：结束面试
+              const lowerText = correctedText.toLowerCase();
+              if (/(结束面试|生成报告|结束吧|到此为止|交卷|可以了|评估报告)/.test(lowerText)) {
+                setInputText(correctedText);
+                setInterimText("");
+                // 延迟一下确保 input 已更新，然后提交
+                setTimeout(() => {
+                  if (sessionId) {
+                    // 模拟点击结束面试
+                    handleEndInterview();
+                  }
+                }, 500);
+                return;
+              }
               setInputText(p => p + correctedText);
               setInterimText("");
             } else {
@@ -1102,17 +1159,40 @@ export default function MockInterviewView({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-8 bg-white/70 backdrop-blur-md rounded-2xl border border-slate-200 shadow-lg flex flex-col h-[580px] overflow-hidden">
               <div className="bg-slate-50 p-4 border-b border-slate-100 flex items-center justify-between">
-                <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3">
                   <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 animate-pulse border-2 border-white" />
                   <span className="text-xs font-bold text-slate-700">AI 面试官 · {interviewDirection}</span>
                 </div>
-                <button onClick={handleEndInterview}
-                  className="text-[10px] font-extrabold text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20 py-2 px-4 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-sm">
-                  <Trophy className="w-3.5 h-3.5" /> 结束面试并生成评估
-                </button>
+                <div className="flex items-center gap-2">
+                  {!isPaused ? (
+                    <button onClick={handlePause}
+                      className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 py-2 px-3 rounded-lg flex items-center gap-1 transition cursor-pointer">
+                      ⏸ 暂停
+                    </button>
+                  ) : (
+                    <button onClick={handleResume}
+                      className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 py-2 px-3 rounded-lg flex items-center gap-1 transition cursor-pointer">
+                      ▶ 继续
+                    </button>
+                  )}
+                  <button onClick={handleEndInterview}
+                    className="text-[10px] font-extrabold text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20 py-2 px-4 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-sm">
+                    <Trophy className="w-3.5 h-3.5" /> 结束面试并生成评估
+                  </button>
+                </div>
               </div>
 
-              <div className="flex-1 p-5 overflow-y-auto space-y-4 bg-slate-50/50">
+              <div className="flex-1 p-5 overflow-y-auto space-y-4 bg-slate-50/50 relative">
+                {/* 暂停中的遮罩层 */}
+                {isPaused && (
+                  <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
+                    <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-6 text-center shadow-lg">
+                      <span className="text-2xl">⏸</span>
+                      <p className="text-sm font-bold text-amber-800 mt-3">面试已暂停</p>
+                      <p className="text-[11px] text-amber-600 mt-1">点击「继续」按钮恢复面试</p>
+                    </div>
+                  </div>
+                )}
                 {messages.map(m => (
                   <div key={m.id} className={`flex items-start gap-3.5 ${m.sender === "candidate" ? "flex-row-reverse" : ""}`}>
                     <div className={`text-xs py-2.5 px-4 rounded-2xl leading-relaxed max-w-[75%] shadow-sm
@@ -1150,9 +1230,10 @@ export default function MockInterviewView({
                   )}
                   <input type="text" disabled={thinking} value={inputText}
                     onChange={e => { setInputText(e.target.value); stopTimeoutTimer(); }}
-                    placeholder={isRecording ? "正在录音..." : "请输入您的回答..."}
-                    className="flex-1 text-xs py-3 px-4 bg-slate-50 rounded-xl border border-slate-200 focus:border-primary outline-none transition" />
-                  <button type="submit" disabled={thinking || !inputText.trim()}
+                    placeholder={isRecording ? "正在录音..." : isPaused ? "面试已暂停" : "请输入您的回答..."}
+                    className="flex-1 text-xs py-3 px-4 bg-slate-50 rounded-xl border border-slate-200 focus:border-primary outline-none transition disabled:opacity-50"
+                    disabled={thinking || isPaused} />
+                  <button type="submit" disabled={thinking || !inputText.trim() || isPaused}
                     className="w-10 h-10 bg-primary hover:bg-primary-container disabled:bg-slate-300 rounded-xl flex items-center justify-center text-white transition shrink-0 cursor-pointer">
                     <Send className="w-4.5 h-4.5" />
                   </button>
