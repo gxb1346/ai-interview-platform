@@ -156,6 +156,14 @@ const LEVELS = ["校招", "中级", "高级"];
 const LEVEL_YEAR_MAP: Record<string, string> = { "校招": "0-1年", "中级": "1-3年", "高级": "3年+" };
 const STAGE_RATIOS: Record<string, number> = { selfIntro: 0.15, techExam: 0.40, projectDeep: 0.30, qaRound: 0.15 };
 
+/** 阶段英文名 -> 中文名映射 */
+const STAGE_LABELS_CN: Record<string, string> = {
+  selfIntro: "自我介绍",
+  techExam: "技术考察",
+  projectDeep: "项目挖深",
+  qaRound: "反问环节"
+};
+
 export default function MockInterviewView({
   candidates, preSelectedCandidate, resumeSessionId,
   onSaveScoreCard, onNavigateToRecords, onSessionCreated
@@ -183,6 +191,14 @@ export default function MockInterviewView({
   const [jdParsing, setJdParsing] = useState(false);
   const [jdResult, setJdResult] = useState<JDParseResult | null>(null);
 
+  // 阶段流转跟踪
+  const [currentStage, setCurrentStage] = useState<string>("");
+
+  // 续面功能
+  const [activeSessions, setActiveSessions] = useState<InterviewSession[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [resuming, setResuming] = useState(false);
+
   // 方向推荐
   const [recommendations, setRecommendations] = useState<DirectionRecommendation[]>([]);
   const [recommending, setRecommending] = useState(false);
@@ -190,6 +206,14 @@ export default function MockInterviewView({
   // 面试官流式回复（逐字输出效果）
   const [streamingReply, setStreamingReply] = useState<string>("");
   const streamingTimerRef = useRef<number | null>(null);
+
+  // 题目进度跟踪
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
+  const [totalQuestions, setTotalQuestions] = useState<number>(0);
+
+  // 回答超时倒计时（秒）
+  const [timeoutRemaining, setTimeoutRemaining] = useState<number>(0);
+  const timeoutTimerRef = useRef<number | null>(null);
 
   // 语音
   const [isRecording, setIsRecording] = useState(false);
@@ -232,6 +256,59 @@ export default function MockInterviewView({
 
   // 人才库候选人
   const [talentCandidates, setTalentCandidates] = useState<Candidate[]>([]);
+
+  // 获取候选人的活跃会话（用于续面）
+  const fetchActiveSessions = useCallback(async (candId: string) => {
+    if (!candId) return;
+    setLoadingSessions(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/mock-interview/candidates/${candId}/active-sessions`);
+      const sessions: InterviewSession[] = await res.json();
+      setActiveSessions(Array.isArray(sessions) ? sessions : []);
+    } catch {
+      setActiveSessions([]);
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, []);
+
+  // 切换候选人时拉取活跃会话
+  useEffect(() => {
+    if (activeCandidateId) {
+      fetchActiveSessions(activeCandidateId);
+    }
+  }, [activeCandidateId, fetchActiveSessions]);
+
+  // 恢复面试会话
+  const handleResumeSession = async (sid: string) => {
+    setResuming(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/mock-interview/sessions/${sid}/resume`, { method: "POST" });
+      if (!res.ok) throw new Error("续面失败");
+      const data = await res.json();
+
+      setSessionId(data.sessionId);
+      setInterviewStarted(true);
+
+      const initialMessages = (data.messages && Array.isArray(data.messages))
+        ? data.messages.map((m: any) => ({
+          id: m.id, sender: m.sender as "interviewer" | "candidate", text: m.text,
+          timestamp: new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        }))
+        : [];
+      setMessages(initialMessages);
+      setCurrentStage(data.currentStage || "");
+
+      setTimeElapsed(0);
+      const interval = setInterval(() => setTimeElapsed(p => p + 1), 1000);
+      setTimerInterval(interval);
+    } catch (err) {
+      console.error("续面失败:", err);
+      alert("恢复面试失败，请重试");
+    } finally {
+      setResuming(false);
+    }
+  };
 
   // 阶段时长计算
   const stageMinutes = useCallback(() => {
@@ -286,6 +363,10 @@ export default function MockInterviewView({
       if (streamingTimerRef.current !== null) {
         clearInterval(streamingTimerRef.current);
         streamingTimerRef.current = null;
+      }
+      if (timeoutTimerRef.current !== null) {
+        clearInterval(timeoutTimerRef.current);
+        timeoutTimerRef.current = null;
       }
     };
   }, [timerInterval]);
@@ -381,6 +462,7 @@ export default function MockInterviewView({
       setInterviewStarted(true);
       setScoreCard(null);
       setEvaluationReport(null);
+      setCurrentStage(startData.currentStage || "selfIntro");
       const initialMessages = (startData.messages && Array.isArray(startData.messages))
         ? startData.messages.map(m => ({
           id: m.id, sender: m.sender as "interviewer" | "candidate", text: m.text,
@@ -451,6 +533,8 @@ export default function MockInterviewView({
           // 流式输出结束后，将完整消息加入 messages 数组
           setMessages(prev => [...prev, { id: replyId, sender: "interviewer" as const, text: replyText, timestamp }]);
           setStreamingReply("");
+          // 流式结束后启动回答超时计时器（180s）
+          startTimeoutTimer();
         }
       }, typeSpeed);
       streamingTimerRef.current = timerId;
@@ -458,6 +542,16 @@ export default function MockInterviewView({
       // 如果后端返回了语音音频，自动播放（语音面试模式默认播放，文字面试也可播放）
       if (data.audio) {
         playTTSAudio(data.audio);
+      }
+
+      if (data.currentStage) {
+        setCurrentStage(data.currentStage);
+      }
+      if (data.currentQuestionIndex !== undefined) {
+        setCurrentQuestionIndex(data.currentQuestionIndex);
+      }
+      if (data.totalQuestions !== undefined) {
+        setTotalQuestions(data.totalQuestions);
       }
 
       if (data.status === "COMPLETED") {
@@ -519,6 +613,76 @@ export default function MockInterviewView({
     const m = Math.floor(secs / 60), s = secs % 60;
     return `${m < 10 ? "0" : ""}${m}:${s < 10 ? "0" : ""}${s}`;
   };
+
+  // 回答超时管理 - handleTimeoutSubmit 必须定义在 startTimeoutTimer 之前（函数顺序依赖）
+  const handleTimeoutSubmit = useCallback(async () => {
+    if (!sessionId || thinking) return;
+    setThinking(true);
+    stopTimeoutTimer();
+    try {
+      const res = await fetch(`${API_BASE}/api/mock-interview/sessions/${sessionId}/chat`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer: "（回答超时）" })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: ChatResponse = await res.json();
+      const replyText = data.reply || "";
+      const replyId = "inter_tout_" + Date.now();
+      const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+      // 流式输出
+      let charIdx = 0;
+      const typeSpeed = 30;
+      const timerId = window.setInterval(() => {
+        charIdx++;
+        setStreamingReply(replyText.substring(0, charIdx));
+        if (charIdx >= replyText.length) {
+          clearInterval(timerId);
+          setMessages(prev => [...prev, {
+            id: replyId, sender: "interviewer" as const, text: replyText, timestamp
+          }]);
+          setStreamingReply("");
+          // 超时回复后启动新的超时计时器
+          startTimeoutTimer();
+        }
+      }, typeSpeed);
+
+      if (data.currentStage) setCurrentStage(data.currentStage);
+      if (data.currentQuestionIndex !== undefined) setCurrentQuestionIndex(data.currentQuestionIndex);
+      if (data.totalQuestions !== undefined) setTotalQuestions(data.totalQuestions);
+
+      if (data.status === "COMPLETED") {
+        if (timerInterval) clearInterval(timerInterval);
+        handleEvaluate(sessionId);
+      }
+    } catch {
+      // 超时提交失败时静默处理
+    } finally { setThinking(false); }
+  }, [sessionId, thinking, timerInterval]);
+
+  const startTimeoutTimer = useCallback(() => {
+    stopTimeoutTimer();
+    setTimeoutRemaining(180);
+    timeoutTimerRef.current = window.setInterval(() => {
+      setTimeoutRemaining(prev => {
+        if (prev <= 1) {
+          stopTimeoutTimer();
+          // 超时自动提交
+          handleTimeoutSubmit();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
+  const stopTimeoutTimer = useCallback(() => {
+    if (timeoutTimerRef.current !== null) {
+      clearInterval(timeoutTimerRef.current);
+      timeoutTimerRef.current = null;
+    }
+    setTimeoutRemaining(0);
+  }, []);
 
   // 语音 - 始终使用 WebSocket 实时 ASR
   const toggleVoiceRecording = () => {
@@ -773,6 +937,33 @@ export default function MockInterviewView({
 
           <hr className="border-slate-100" />
 
+          {/* 续面提示：检测到活跃面试会话 */}
+          {activeSessions.length > 0 && !loadingSessions && (
+            <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 text-amber-600" />
+                <span className="text-sm font-bold text-amber-800">检测到未完成的面试</span>
+              </div>
+              <p className="text-xs text-amber-700">
+                该候选人共有 {activeSessions.length} 个进行中的面试会话，可以继续上次的面试。
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {activeSessions.map(s => (
+                  <button key={s.sessionId} onClick={() => handleResumeSession(s.sessionId)} disabled={resuming}
+                    className="text-xs font-semibold bg-white text-amber-700 border border-amber-300 hover:bg-amber-100 px-4 py-2 rounded-xl transition cursor-pointer disabled:opacity-40 flex items-center gap-1.5">
+                    <RefreshCw className="w-3 h-3" />
+                    续面: {s.direction} ({s.level}) - 第{s.currentRound}轮
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {loadingSessions && (
+            <div className="text-xs text-slate-400 italic flex items-center gap-1.5">
+              <Loader2 className="w-3 h-3 animate-spin" /> 检查未完成面试...
+            </div>
+          )}
+
           {/* 面试模式 */}
           <div className="space-y-3">
             <h3 className="text-sm font-bold text-slate-800">面试模式</h3>
@@ -905,7 +1096,7 @@ export default function MockInterviewView({
             <span>{formatTimer(timeElapsed)}</span>
             <span className="text-slate-400">| {activeCand?.name}</span>
             {interviewDirection && <span className="text-primary">| {interviewDirection} · {interviewLevel}</span>}
-            <span className="text-slate-400">| {STAGE_LABELS[messages.length > 0 ? "techExam" : "selfIntro"] || "进行中"}</span>
+            <span className="text-primary font-bold">| {STAGE_LABELS_CN[currentStage] || "进行中"}</span>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -958,7 +1149,7 @@ export default function MockInterviewView({
                     </button>
                   )}
                   <input type="text" disabled={thinking} value={inputText}
-                    onChange={e => setInputText(e.target.value)}
+                    onChange={e => { setInputText(e.target.value); stopTimeoutTimer(); }}
                     placeholder={isRecording ? "正在录音..." : "请输入您的回答..."}
                     className="flex-1 text-xs py-3 px-4 bg-slate-50 rounded-xl border border-slate-200 focus:border-primary outline-none transition" />
                   <button type="submit" disabled={thinking || !inputText.trim()}
@@ -980,6 +1171,39 @@ export default function MockInterviewView({
                   <span className="text-xs font-bold text-slate-700">方向：{interviewDirection}</span>
                   <p className="text-[10px] text-slate-500">难度：{interviewLevel} · 时长：{totalDuration}分钟</p>
                 </div>
+                {/* 题目进度 */}
+                {totalQuestions > 0 && (
+                  <div className="p-3 bg-white rounded-xl border border-slate-100 space-y-1 shadow-sm">
+                    <span className="text-xs font-bold text-slate-700">题目进度</span>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <div className="flex-1 bg-slate-200 h-2 rounded-full overflow-hidden">
+                        <div className="bg-primary h-full rounded-full transition-all duration-500"
+                          style={{ width: `${Math.min(100, (currentQuestionIndex / Math.max(1, totalQuestions)) * 100)}%` }} />
+                      </div>
+                      <span className="text-[10px] font-bold text-primary shrink-0">{Math.min(currentQuestionIndex + 1, totalQuestions)}/{totalQuestions}</span>
+                    </div>
+                  </div>
+                )}
+                {/* 回答超时倒计时 */}
+                {timeoutRemaining > 0 && (
+                  <div className={`p-3 rounded-xl border space-y-1 shadow-sm ${
+                    timeoutRemaining <= 30 ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"
+                  }`}>
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className={`font-bold ${timeoutRemaining <= 30 ? "text-red-700" : "text-amber-700"}`}>
+                        ⏱ 作答剩余时间
+                      </span>
+                      <span className={`font-black ${timeoutRemaining <= 30 ? "text-red-600" : "text-amber-600"}`}>
+                        {formatTimer(timeoutRemaining)}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mt-1">
+                      <div className={`h-full rounded-full transition-all duration-1000 ${
+                        timeoutRemaining <= 30 ? "bg-red-500" : "bg-amber-500"
+                      }`} style={{ width: `${(timeoutRemaining / 180) * 100}%` }} />
+                    </div>
+                  </div>
+                )}
                 <div className="p-3 bg-white rounded-xl border border-slate-100 space-y-1 shadow-sm">
                   <span className="text-xs font-bold text-slate-700">阶段分配</span>
                   {Object.entries(STAGE_LABELS).map(([k, v]) => (

@@ -402,6 +402,18 @@ public class ResumeService {
     }
 
     /**
+     * 批量软删除简历
+     */
+    @Transactional
+    public void batchSoftDelete(List<Long> ids) {
+        List<Resume> resumes = resumeRepository.findAllById(ids);
+        for (Resume resume : resumes) {
+            resume.setDeleted(true);
+        }
+        resumeRepository.saveAll(resumes);
+    }
+
+    /**
      * 硬删除简历
      */
     @Transactional
@@ -491,6 +503,80 @@ public class ResumeService {
             case "doc" -> "application/msword";
             default -> "text/plain";
         };
+    }
+
+    /**
+     * 批量处理多份简历
+     * 对每份文件依次执行：类型校验 → Tika解析 → 去重检查 → Redis缓存 → AI分析 → S3上传 → DB持久化
+     *
+     * @param files    上传的文件列表
+     * @param targetJob 目标岗位（可选）
+     * @return 每份文件的处理结果列表
+     */
+    public List<Map<String, Object>> batchProcessResumes(List<MultipartFile> files, String targetJob) {
+        List<Map<String, Object>> results = new java.util.ArrayList<>();
+
+        for (MultipartFile file : files) {
+            Map<String, Object> result = new HashMap<>();
+            String fileName = file.getOriginalFilename();
+            result.put("fileName", fileName != null ? fileName : "unknown");
+
+            try {
+                String fileType = TikaService.getFileType(fileName != null ? fileName : "unknown");
+                validateFileType(fileType);
+
+                String rawText = tikaService.extractText(file);
+                String contentHash = md5(rawText);
+
+                // 去重检查
+                List<Resume> existing = resumeRepository.findByContentHashAndDeletedFalse(contentHash);
+                if (!existing.isEmpty()) {
+                    Resume dup = existing.get(0);
+                    result.put("status", "duplicate");
+                    result.put("candidateName", dup.getCandidateName() != null ? dup.getCandidateName() : "未知");
+                    result.put("message", "该简历内容已在系统中存在");
+                    results.add(result);
+                    continue;
+                }
+
+                // Redis 缓存检查
+                String cacheKey = buildCacheKey(contentHash, targetJob);
+                AnalysisResult analysisResult = null;
+                try {
+                    String cachedJson = redisTemplate.opsForValue().get(cacheKey);
+                    if (cachedJson != null) {
+                        analysisResult = objectMapper.readValue(cachedJson, AnalysisResult.class);
+                    }
+                } catch (Exception ignored) {}
+
+                if (analysisResult == null) {
+                    analysisResult = analysisService.analyze(rawText, targetJob);
+                    if (cacheKey != null) {
+                        cacheResult(cacheKey, analysisResult);
+                    }
+                }
+
+                // S3 上传
+                String s3Key = uploadToS3(file, fileType);
+
+                // DB 持久化
+                Resume saved = saveToDatabase(analysisResult, fileName != null ? fileName : "unknown",
+                        fileType, s3Key, file.getSize(), rawText, contentHash);
+
+                result.put("status", "success");
+                result.put("candidateName", saved.getCandidateName() != null ? saved.getCandidateName() : "未知");
+                result.put("id", saved.getId());
+                result.put("matchScore", saved.getMatchScore());
+
+            } catch (Exception e) {
+                result.put("status", "error");
+                result.put("message", e.getMessage());
+            }
+
+            results.add(result);
+        }
+
+        return results;
     }
 
     private void validateFileType(String fileType) {

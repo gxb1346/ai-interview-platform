@@ -1,12 +1,15 @@
 package com.interview.modules.interview.model;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * 面试阶段时长配置
  * 总时长拖动后各阶段按时比自动分配
+ * 包含阶段流转顺序定义
  */
 public class StageConfig implements Serializable {
 
@@ -14,6 +17,24 @@ public class StageConfig implements Serializable {
     public static final String STAGE_TECH_EXAM = "techExam";
     public static final String STAGE_PROJECT_DEEP = "projectDeep";
     public static final String STAGE_QA_ROUND = "qaRound";
+
+    /** 阶段流转顺序 */
+    public static final List<String> STAGE_ORDER = Arrays.asList(
+            STAGE_SELF_INTRO,
+            STAGE_TECH_EXAM,
+            STAGE_PROJECT_DEEP,
+            STAGE_QA_ROUND
+    );
+
+    /** 各阶段中文名称 */
+    public static final Map<String, String> STAGE_LABELS = new LinkedHashMap<>();
+
+    static {
+        STAGE_LABELS.put(STAGE_SELF_INTRO, "自我介绍");
+        STAGE_LABELS.put(STAGE_TECH_EXAM, "技术考察");
+        STAGE_LABELS.put(STAGE_PROJECT_DEEP, "项目深挖");
+        STAGE_LABELS.put(STAGE_QA_ROUND, "反问环节");
+    }
 
     /** 各阶段默认时长占比 */
     private static final Map<String, Double> DEFAULT_RATIOS = new LinkedHashMap<>();
@@ -60,6 +81,22 @@ public class StageConfig implements Serializable {
         }
 
         return result;
+    }
+
+    /**
+     * 获取下一个阶段
+     */
+    public static String getNextStage(String currentStage) {
+        int idx = STAGE_ORDER.indexOf(currentStage);
+        if (idx < 0 || idx >= STAGE_ORDER.size() - 1) return null;
+        return STAGE_ORDER.get(idx + 1);
+    }
+
+    /**
+     * 判断是否为最后一个阶段
+     */
+    public static boolean isLastStage(String stage) {
+        return STAGE_QA_ROUND.equals(stage);
     }
 
     public int getTotalMinutes() {

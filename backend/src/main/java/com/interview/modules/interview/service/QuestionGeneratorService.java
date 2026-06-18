@@ -58,12 +58,12 @@ public class QuestionGeneratorService {
 
         boolean hasResume = resumeText != null && !resumeText.isBlank();
 
-        if (!hasResume) {
-            // 无简历时：100% Skill 出题
+        // 自我介绍和反问环节：不需要简历深挖，100% Skill 出题
+        if (!hasResume || "selfIntro".equals(stage) || "qaRound".equals(stage)) {
             return generateSkillQuestions(directionName, level, stage, totalCount, excludeIds);
         }
 
-        // 有简历时：60% 简历深挖 + 40% 方向基础
+        // 有简历时（techExam / projectDeep）：60% 简历深挖 + 40% 方向基础
         int skillCount = (int) Math.ceil(totalCount * 0.4);
         int resumeCount = totalCount - skillCount;
 
@@ -110,7 +110,7 @@ public class QuestionGeneratorService {
                                                                      String stage,
                                                                      int count) {
         try {
-            String prompt = buildResumeDeepDivePrompt(resumeText, directionName, level, count);
+            String prompt = buildResumeDeepDivePrompt(resumeText, directionName, level, count, stage);
             String response = resumeChatClient.prompt()
                     .user(prompt)
                     .call()
@@ -126,9 +126,14 @@ public class QuestionGeneratorService {
     /**
      * 构建简历深挖 Prompt
      */
-    private String buildResumeDeepDivePrompt(String resumeText, String direction, String level, int count) {
-        return """
-            你是一个资深技术面试官。请根据以下候选人的简历，生成 %d 道针对性的项目深挖面试题。
+    private String buildResumeDeepDivePrompt(String resumeText, String direction, String level, int count, String stage) {
+        String stageIntro = switch (stage) {
+            case "techExam" -> "%d 道技术考察题，基于候选人的简历项目经验进行提问";
+            case "projectDeep" -> "%d 道项目深挖题，深入挖掘简历中的项目细节";
+            default -> "%d 道面试题";
+        };
+        return String.format("""
+            你是一个资深技术面试官。请根据以下候选人的简历，生成 %s。
             
             面试方向：%s
             面试难度：%s
@@ -139,6 +144,7 @@ public class QuestionGeneratorService {
             3. 考察候选人是否真正深入理解了自身项目的架构和技术选型
             4. 每道题应包含具体的场景引用："你在简历中提到..."
             5. 不要问通用问题，所有问题必须能从简历中找到对应的切入点
+            6. 每道题的text字段必须只包含一个独立问题，严禁将多个子问题合并为一道题
             
             简历内容：
             ---
@@ -146,7 +152,7 @@ public class QuestionGeneratorService {
             ---
             
             请以 JSON 数组格式返回，每道题包含：text（题目内容）、difficultyScore（难度系数1-10）、category（知识点分类）。
-            """.formatted(count, direction, level, resumeText);
+            """, stageIntro.formatted(count), direction, level, resumeText);
     }
 
     @SuppressWarnings("unchecked")

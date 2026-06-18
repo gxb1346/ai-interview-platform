@@ -11,6 +11,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
+
 /**
  * 简历分析 REST 控制器
  *
@@ -48,6 +49,32 @@ public class ResumeController {
             return Result.error("简历分析失败: " + e.getMessage());
         }
     }
+
+    /**
+     * 批量上传并分析多份简历（最多20份）
+     */
+    @PostMapping(value = "/upload/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result<List<Map<String, Object>>> batchUpload(
+            @RequestParam("files") List<MultipartFile> files,
+            @RequestParam(value = "targetJob", required = false) String targetJob) {
+
+        if (files == null || files.isEmpty()) {
+            return Result.error("上传文件列表为空");
+        }
+
+        if (files.size() > 20) {
+            return Result.error("单次上传不能超过 20 份简历");
+        }
+
+        try {
+            List<Map<String, Object>> results = resumeService.batchProcessResumes(files, targetJob);
+            return Result.success(results);
+        } catch (Exception e) {
+            return Result.error("批量上传失败: " + e.getMessage());
+        }
+    }
+
+
 
     /**
      * 异步上传简历（通过 Redis Stream 异步分析）
@@ -163,6 +190,22 @@ public class ResumeController {
             return Result.success(vo);
         } catch (Exception e) {
             return Result.error("更新失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 批量软删除简历
+     */
+    @PostMapping("/batch-delete")
+    public Result<Void> batchDelete(@RequestBody List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Result.error("删除ID列表为空");
+        }
+        try {
+            resumeService.batchSoftDelete(ids);
+            return Result.success(null);
+        } catch (Exception e) {
+            return Result.error("批量删除失败: " + e.getMessage());
         }
     }
 

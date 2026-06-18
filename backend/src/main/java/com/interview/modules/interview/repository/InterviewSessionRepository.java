@@ -65,14 +65,14 @@ public class InterviewSessionRepository {
     }
 
     /**
-     * 查询某个候选人的所有会话
+     * 查询某候选人的所有会话
      */
     public List<InterviewSession> findByCandidateId(String candidateId) {
         try {
             String indexKey = candidateIndexKey(candidateId);
             Set<String> sessionIds = redisTemplate.opsForSet().members(indexKey);
             if (sessionIds == null || sessionIds.isEmpty()) return Collections.emptyList();
-
+    
             return sessionIds.stream()
                     .map(this::findById)
                     .filter(Optional::isPresent)
@@ -81,6 +81,15 @@ public class InterviewSessionRepository {
         } catch (Exception e) {
             return Collections.emptyList();
         }
+    }
+    
+    /**
+     * 查询候选人所有进行中的会话（用于续面）
+     */
+    public List<InterviewSession> findActiveByCandidateId(String candidateId) {
+        return findByCandidateId(candidateId).stream()
+                .filter(s -> "IN_PROGRESS".equals(s.getStatus()))
+                .collect(Collectors.toList());
     }
 
     /**

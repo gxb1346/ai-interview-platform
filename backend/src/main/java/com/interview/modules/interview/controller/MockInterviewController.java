@@ -78,6 +78,8 @@ public class MockInterviewController {
         Map<String, Object> response = new HashMap<>();
         response.put("reply", replyText);
         response.put("currentRound", session.getCurrentRound());
+        response.put("currentQuestionIndex", session.getCurrentQuestionIndex());
+        response.put("totalQuestions", session.getQuestions() == null ? 0 : session.getQuestions().size());
         response.put("currentStage", session.getCurrentStage());
         response.put("status", session.getStatus());
 
@@ -88,6 +90,40 @@ public class MockInterviewController {
         }
 
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 获取候选人活跃面试会话（用于续面）
+     */
+    @GetMapping("/candidates/{candidateId}/active-sessions")
+    public ResponseEntity<List<InterviewSession>> getActiveSessions(@PathVariable String candidateId) {
+        return ResponseEntity.ok(interviewService.getActiveSessions(candidateId));
+    }
+
+    /**
+     * 恢复面试会话（从中断处继续）
+     */
+    @PostMapping("/sessions/{sessionId}/resume")
+    public ResponseEntity<Map<String, Object>> resumeSession(@PathVariable String sessionId) {
+        try {
+            InterviewSession session = interviewService.resumeSession(sessionId);
+            Map<String, Object> response = new HashMap<>();
+            response.put("sessionId", session.getSessionId());
+            response.put("status", session.getStatus());
+            response.put("questions", session.getQuestions().stream().map(q -> Map.of(
+                    "id", q.getId(),
+                    "text", q.getText(),
+                    "category", q.getCategory(),
+                    "difficultyScore", q.getDifficultyScore(),
+                    "source", q.getSource()
+            )).toList());
+            response.put("currentStage", session.getCurrentStage());
+            response.put("currentRound", session.getCurrentRound());
+            response.put("messages", session.getMessages());
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 
     /**

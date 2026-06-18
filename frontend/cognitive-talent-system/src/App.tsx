@@ -222,7 +222,7 @@ export default function App() {
         
         {/* Left Sidebar Menu Layout */}
         <aside
-          className={`fixed inset-y-0 left-0 bg-white border-r border-slate-200 w-64 z-30 transition-transform transform md:translate-x-0 flex flex-col justify-between p-5 md:static ${
+          className={`fixed inset-y-0 left-0 bg-white border-r border-slate-200 w-64 z-30 transition-transform transform md:translate-x-0 flex flex-col justify-between p-5 ${
             mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
@@ -306,7 +306,7 @@ export default function App() {
         )}
 
         {/* Main Content Dashboard Frame */}
-        <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+        <main className="flex-1 flex flex-col min-w-0 overflow-y-auto md:ml-64">
           {/* Header Top Nav bar */}
           <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 py-4 px-6 flex items-center justify-between gap-4 sticky top-0 z-10">
             {/* Left section displays screen name or mobile toggler */}

@@ -145,40 +145,145 @@ public class DefaultInterviewSkill implements InterviewSkill {
             %s
             
             请生成 %d 道 %s 难度的面试题，要求：
-            1. 题目考察实际工作中的真实场景，而非纯理论
-            2. 难度分布合理，由浅入深
-            3. 每道题包含场景描述和具体问题
-            4. 答案预期：考察候选人的深度理解和实际经验
-            5. 避免与已有题目重复
+            1. 每道题的text字段必须只包含一个独立问题，严禁将多个子问题合并为一道题
+            2. 题目考察实际工作中的真实场景，而非纯理论
+            3. 难度分布合理，由浅入深
+            4. 每道题包含场景描述和具体问题（场景和问题合并为一个完整的独立问题）
+            5. 答案预期：考察候选人的深度理解和实际经验
+            6. 避免与已有题目重复
             
-            请以 JSON 数组格式返回，每道题包含：text（题目内容）、difficultyScore（难度系数1-10）、category（知识点分类）。
+            请以 JSON 数组格式返回，数组中必须包含 %d 个元素，每道题包含：text（题目内容）、difficultyScore（难度系数1-10）、category（知识点分类）。
+            CRITICAL: 数组中的每个元素必须是完全独立的题目，不能有任何两道题属于同一个场景或话题。
             """;
     }
 
     @Override
     public List<InterviewQuestion> generateQuestions(int count, String level,
                                                       String stage, List<String> excludeIds) {
+        // 自我介绍环节：强制使用非技术硬编码题目，确保不问技术题
+        if ("selfIntro".equals(stage)) {
+            return generateSelfIntroQuestions(count, level, stage);
+        }
+
         try {
             String scopeStr = String.join("、", getScopeAreas());
             String knowledgeStr = getKnowledgeBase().isEmpty()
                     ? "暂无预设知识库"
                     : String.join("\n- ", getKnowledgeBase());
 
-            String prompt = String.format(getPromptTemplate(),
-                    directionName, scopeStr, knowledgeStr, count, level);
+            String prompt = buildStagePrompt(count, level, stage, scopeStr, knowledgeStr);
 
             String response = chatClient.prompt()
                     .user(prompt)
                     .call()
                     .content();
 
-            // 解析 LLM 返回的 JSON 并包装为 InterviewQuestion
-            return parseQuestions(response, count, level, stage);
+            List<InterviewQuestion> parsed = parseQuestions(response, count, level, stage);
+            // 如果AI返回的题目数量远少于要求，使用fallback
+            if (parsed.size() < Math.max(1, count / 2)) {
+                System.err.println("AI出题数量不足(" + parsed.size() + "/" + count + ")，使用fallback");
+                return generateFallbackQuestions(count, level, stage);
+            }
+            return parsed;
 
         } catch (Exception e) {
-            // 降级：返回预设模板问题
             return generateFallbackQuestions(count, level, stage);
         }
+    }
+
+    /**
+     * 自我介绍环节专用题目：纯背景了解，不含任何技术考察
+     */
+    private List<InterviewQuestion> generateSelfIntroQuestions(int count, String level, String stage) {
+        List<InterviewQuestion> questions = new ArrayList<>();
+        String[] templates = {
+            "请简单介绍一下你自己，包括你的教育背景和所学专业。",
+            "你在学校或工作中最让你有成就感的一件事情是什么？",
+            "你对自己未来的职业发展有什么规划和期望？",
+            "请谈谈你在团队合作中通常扮演什么角色，以及你是如何与团队协作的。",
+            "你平时通过什么方式学习和提升自己的技术能力？",
+            "请分享一下你为什么选择这个行业，是什么让你对这个方向感兴趣？",
+            "在你过往的经历中，有没有遇到过印象深刻的困难？你是如何应对的？",
+            "你希望从下一份工作中获得什么？"
+        };
+        int qCount = Math.min(count, templates.length);
+        for (int i = 0; i < qCount; i++) {
+            InterviewQuestion q = new InterviewQuestion();
+            q.setId(UUID.randomUUID().toString());
+            q.setText(templates[i]);
+            q.setSource("SKILL");
+            q.setDirection(directionName);
+            q.setLevel(level);
+            q.setStage(stage);
+            q.setCategory("自我介绍");
+            q.setDifficultyScore(1);
+            questions.add(q);
+        }
+        return questions;
+    }
+
+    /**
+     * 根据面试阶段构建出题 prompt
+     * 注意：selfIntro 已被 generateSelfIntroQuestions 接管，此方法不再处理 selfIntro
+     */
+    private String buildStagePrompt(int count, String level, String stage,
+                                     String scopeStr, String knowledgeStr) {
+        if (stage == null) stage = "";
+        return switch (stage) {
+            case "selfIntro" -> String.format("""
+                你是一个专业的面试官。请为【%s】方向的面试生成 %d 道自我介绍环节的引导问题。
+                面试难度：%s
+                
+                要求：
+                1. 题目应引导候选人介绍自己的技术背景、工作经历和职业规划
+                2. 侧重了解候选人的项目经验概览、技术成长路径
+                3. 考察候选人的表达能力和自我认知
+                4. 不要涉及具体技术细节的深挖
+                5. 问题应友好、开放
+                
+                请以 JSON 数组格式返回，每道题包含：text（题目内容）、difficultyScore（难度系数1-10）、category（知识点分类）。
+                """, directionName, count, level);
+            case "projectDeep" -> String.format("""
+                你是一个资深技术面试官。请为【%s】方向的 %s 难度面试生成 %d 道项目深挖环节的题目。
+                
+                考察范围：
+                %s
+                
+                参考知识库：
+                %s
+                
+                要求：
+                1. 每道题的text字段必须只包含一个独立问题，严禁将多个子问题合并为一道题
+                2. 题目应深入挖掘候选人简历中的项目经历和架构决策
+                3. 侧重考察候选人在实际项目中的技术深度和系统设计能力
+                4. 关注候选人在项目中的角色、贡献和解决问题的思路
+                5. 每道题应引导候选人描述具体的技术方案和权衡过程
+                6. 不要出纯理论题，要结合项目实践
+                
+                请以 JSON 数组格式返回，数组中必须包含 %d 个元素，每道题包含：text（题目内容）、difficultyScore（难度系数1-10）、category（知识点分类）。
+                CRITICAL: 每个元素必须是一道独立的题目，不能有任何两道题共用同一个场景描述。
+                """, directionName, level, count, scopeStr, knowledgeStr, count);
+            case "qaRound" -> String.format("""
+                你是一个专业的面试官。请为【%s】方向的面试生成 %d 道反问环节的引导提示。
+                面试难度：%s
+                
+                考察范围：
+                %s
+                
+                要求：
+                1. 每道题必须是一个独立的引导提示，严禁合并多个话题
+                2. 题目应模拟候选人向面试官提问的场景
+                3. 引导候选人主动提问，考察其对岗位的思考深度和主动性
+                4. 问题方向包括：技术选型、团队协作方式、职业发展路径、业务方向等
+                5. 不要出技术考察题，而是提供"候选人可以向面试官提问"的示例问题
+                6. 每道题应以"你可以这样提问："开头
+                
+                请以 JSON 数组格式返回，数组中必须包含 %d 个元素，每道题包含：text（题目内容）、difficultyScore（难度系数1-10）、category（知识点分类）。
+                """, directionName, count, level, scopeStr, count);
+            default -> // techExam 及其他阶段：保持原有的技术考察题
+                String.format(getPromptTemplate(),
+                        directionName, scopeStr, knowledgeStr, count, level, count);
+        };
     }
 
     @SuppressWarnings("unchecked")

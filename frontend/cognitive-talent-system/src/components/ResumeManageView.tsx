@@ -41,6 +41,11 @@ export default function ResumeManageView() {
   const [deleteTarget, setDeleteTarget] = useState<ResumeVO | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // 批量删除
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+
   // 移入人才库
   const [talentPoolTarget, setTalentPoolTarget] = useState<number | null>(null);
 
@@ -87,7 +92,7 @@ export default function ResumeManageView() {
     setPage(0);
   };
 
-  // 删除（仅软删除）
+  // 单个删除（仅软删除）
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -104,6 +109,52 @@ export default function ResumeManageView() {
       setError("删除失败: " + err.message);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  // 选择/取消选择
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // 全选/取消全选
+  const toggleSelectAll = () => {
+    if (!data) return;
+    const allIds = data.list.map(item => item.id);
+    setSelectedIds(prev => {
+      const allSelected = allIds.every(id => prev.has(id));
+      if (allSelected) return new Set();
+      return new Set(allIds);
+    });
+  };
+
+  // 批量删除
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setBatchDeleting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/resume/batch-delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Array.from(selectedIds)),
+      });
+      const json: ApiResult<null> = await res.json();
+      if (json.code === 200) {
+        setSelectedIds(new Set());
+        setShowBatchDeleteConfirm(false);
+        fetchData();
+      } else {
+        setError(json.message || "批量删除失败");
+      }
+    } catch (err: any) {
+      setError("批量删除失败: " + err.message);
+    } finally {
+      setBatchDeleting(false);
     }
   };
 
@@ -246,6 +297,19 @@ export default function ResumeManageView() {
 
       {/* 列表 */}
       <div className="bg-white/80 backdrop-blur-md rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {/* 批量操作栏 */}
+        {selectedIds.size > 0 && (
+          <div className="flex items-center justify-between px-4 py-3 bg-primary/5 border-b border-primary/10">
+            <span className="text-xs font-semibold text-primary">
+              已选择 {selectedIds.size} 项
+            </span>
+            <button onClick={() => setShowBatchDeleteConfirm(true)}
+              className="text-xs font-semibold py-1.5 px-3 rounded-lg bg-red-500 hover:bg-red-600 text-white transition cursor-pointer flex items-center gap-1">
+              <Trash2 className="w-3.5 h-3.5" />
+              批量删除
+            </button>
+          </div>
+        )}
         {loading && !data ? (
           <div className="p-12 text-center text-sm text-slate-400">加载中...</div>
         ) : data && data.list.length === 0 ? (
@@ -258,6 +322,14 @@ export default function ResumeManageView() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="w-10 py-3.5 px-2 text-center">
+                    {data && data.list.length > 0 && (
+                      <input type="checkbox"
+                        checked={data.list.every(item => selectedIds.has(item.id))}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary/30 cursor-pointer" />
+                    )}
+                  </th>
                   <th className="text-left font-semibold text-slate-500 uppercase py-3.5 px-4">姓名</th>
                   <th className="text-left font-semibold text-slate-500 uppercase py-3.5 px-4 hidden md:table-cell">岗位</th>
                   <th className="text-left font-semibold text-slate-500 uppercase py-3.5 px-4 hidden lg:table-cell">学历</th>
@@ -270,6 +342,12 @@ export default function ResumeManageView() {
               <tbody>
                 {data?.list.map((item) => (
                   <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                    <td className="py-3.5 px-2 text-center">
+                      <input type="checkbox"
+                        checked={selectedIds.has(item.id)}
+                        onChange={() => toggleSelect(item.id)}
+                        className="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary/30 cursor-pointer" />
+                    </td>
                     <td className="py-3.5 px-4">
                       <div>
                         <span className="font-semibold text-slate-800">{item.candidateName || "—"}</span>
@@ -399,6 +477,39 @@ export default function ResumeManageView() {
               <button onClick={handleDelete} disabled={deleting}
                 className="text-xs font-semibold py-2 px-4 rounded-xl bg-red-500 hover:bg-red-600 text-white-pure transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5">
                 {deleting ? "删除中..." : "确认删除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 批量删除确认弹窗 */}
+      {showBatchDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-red-500" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800 font-sans">确认批量软删除</h3>
+                <p className="text-xs text-slate-500 font-sans">
+                  即将删除 {selectedIds.size} 条简历记录
+                </p>
+                <p className="text-[10px] text-slate-400 font-sans mt-1">
+                  软删除后可在数据库中恢复，前端不再展示
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowBatchDeleteConfirm(false)}
+                className="text-xs font-semibold py-2 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer">
+                取消
+              </button>
+              <button onClick={handleBatchDelete} disabled={batchDeleting}
+                className="text-xs font-semibold py-2 px-4 rounded-xl bg-red-500 hover:bg-red-600 text-white-pure transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5">
+                {batchDeleting ? "删除中..." : `确认删除 (${selectedIds.size})`}
               </button>
             </div>
           </div>

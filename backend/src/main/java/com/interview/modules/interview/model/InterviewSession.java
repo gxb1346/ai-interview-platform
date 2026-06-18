@@ -39,6 +39,12 @@ public class InterviewSession implements Serializable {
     /** 当前对话轮数 */
     private int currentRound;
 
+    /** 当前题目索引（独立于 round，用于正确跟踪追问与切换题目） */
+    private int currentQuestionIndex;
+
+    /** 当前题目已追问次数（切换题目后重置为 0） */
+    private int followUpIndex;
+
     /** 时间戳 */
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -50,6 +56,8 @@ public class InterviewSession implements Serializable {
         this.askedQuestionIds = new ArrayList<>();
         this.currentStage = StageConfig.STAGE_SELF_INTRO;
         this.currentRound = 0;
+        this.currentQuestionIndex = 0;
+        this.followUpIndex = 0;
         this.status = "PREPARING";
         this.followUpCount = 1;
         this.totalDuration = 60;
@@ -115,6 +123,12 @@ public class InterviewSession implements Serializable {
 
     public int getCurrentRound() { return currentRound; }
     public void setCurrentRound(int currentRound) { this.currentRound = currentRound; }
+
+    public int getCurrentQuestionIndex() { return currentQuestionIndex; }
+    public void setCurrentQuestionIndex(int currentQuestionIndex) { this.currentQuestionIndex = currentQuestionIndex; }
+
+    public int getFollowUpIndex() { return followUpIndex; }
+    public void setFollowUpIndex(int followUpIndex) { this.followUpIndex = followUpIndex; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

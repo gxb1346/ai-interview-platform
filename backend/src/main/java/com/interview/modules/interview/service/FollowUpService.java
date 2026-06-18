@@ -6,7 +6,7 @@ import org.springframework.stereotype.Service;
 
 /**
  * 智能追问服务
- * 支持配置多轮智能追问（默认 1 条），模拟多轮问答场景
+ * 支持按面试阶段生成差异化追问和过渡语
  */
 @Service
 public class FollowUpService {
@@ -15,7 +15,7 @@ public class FollowUpService {
 
     public FollowUpService(ChatClient.Builder chatClientBuilder) {
         this.chatClient = chatClientBuilder
-                .defaultSystem("你是一个技术面试官，善于根据候选人的回答进行深度追问。")
+                .defaultSystem("你是一个面试官，善于根据候选人的回答进行恰当追问。")
                 .build();
     }
 
@@ -25,29 +25,68 @@ public class FollowUpService {
      * @param lastAnswer    候选人的上一条回答
      * @param question      当前面试题目
      * @param followUpIndex 当前是第几轮追问（从 1 开始）
+     * @param stage         当前面试阶段
      * @return 追问内容
      */
-    public String generateFollowUp(String lastAnswer, InterviewQuestion question, int followUpIndex) {
+    public String generateFollowUp(String lastAnswer, InterviewQuestion question, int followUpIndex, String stage) {
         try {
-            String prompt = buildFollowUpPrompt(lastAnswer, question, followUpIndex);
+            String prompt = buildFollowUpPrompt(lastAnswer, question, followUpIndex, stage);
             return chatClient.prompt()
                     .user(prompt)
                     .call()
                     .content();
         } catch (Exception e) {
             System.err.println("生成追问失败: " + e.getMessage());
-            return getFallbackFollowUp(question, followUpIndex);
+            return getFallbackFollowUp(stage, followUpIndex);
         }
     }
 
-    private String buildFollowUpPrompt(String lastAnswer, InterviewQuestion question, int followUpIndex) {
+    private String buildFollowUpPrompt(String lastAnswer, InterviewQuestion question, int followUpIndex, String stage) {
+        String stageInstruction = getStageFollowUpInstruction(stage);
         return String.format("""
-                你是一个技术面试官，正在对候选人进行深度追问。
+                你是一个面试官，正在对候选人进行追问。
                 
+                当前面试阶段：%s
                 本轮是第 %d 轮追问。
                 原始问题：%s
                 候选人回答：%s
                 
+                %s
+                
+                请给出面试官的发言：
+                """, getStageLabel(stage), followUpIndex, question.getText(), lastAnswer, stageInstruction);
+    }
+
+    private String getStageFollowUpInstruction(String stage) {
+        if (stage == null) stage = "";
+        return switch (stage) {
+            case "selfIntro" -> """
+                要求：
+                1. 这是自我介绍环节，追问应围绕候选人的背景、经历和职业规划展开
+                2. 如果回答过于简短（如"就读南京理工大学"），应温和地引导候选人展开更多背景信息
+                3. 可以追问：专业方向、学习经历、项目经历概览、职业发展目标等
+                4. 语气亲切友好，像一个HR在了解候选人的基本情况
+                5. 不要追问技术细节，不要出技术题
+                6. 追问控制在 100 字以内
+                """;
+            case "qaRound" -> """
+                要求：
+                1. 这是反问环节，鼓励候选人主动提问
+                2. 如果候选人没有提问，可以给一些示例问题引导
+                3. 不要追问技术细节
+                4. 语气友好开放
+                """;
+            case "projectDeep" -> """
+                要求：
+                1. 追问必须基于候选人的实际回答内容，不能是预设模板
+                2. 追问要深入到项目细节，考察候选人的真实理解深度
+                3. 关注候选人在项目中的角色、架构决策和技术权衡
+                4. 如果候选人回答比较浅显，追问应引导其展开更多技术细节
+                5. 追问控制在 200 字以内
+                6. 保持技术面试官专业、友好的语气
+                """;
+            default -> // techExam
+                """
                 要求：
                 1. 追问必须基于候选人的实际回答内容，不能是预设模板
                 2. 追问要深入到技术细节，考察候选人的真实理解深度
@@ -55,26 +94,41 @@ public class FollowUpService {
                 4. 如果候选人回答比较浅显，追问应引导其展开更多细节
                 5. 追问控制在 200 字以内
                 6. 保持面试官专业、友好的语气
-                
-                请给出追问内容：
-                """, followUpIndex, question.getText(), lastAnswer);
+                """;
+        };
     }
 
-    private String getFallbackFollowUp(InterviewQuestion question, int followUpIndex) {
-        return switch (followUpIndex) {
-            case 1 -> "能否进一步深入谈谈你在技术选型时做的权衡和取舍？";
-            case 2 -> "你提到了具体的实施方案，那在面对资源限制或时间压力时，你是如何做优先级决策的？";
-            case 3 -> "这个方案在极端场景下（如流量暴增 10 倍）还能保持稳定吗？你考虑过哪些容灾措施？";
-            default -> "请继续深入分享一下你在这个技术领域的其他实践经验。";
+    private String getStageLabel(String stage) {
+        if (stage == null) return "";
+        return switch (stage) {
+            case "selfIntro" -> "自我介绍";
+            case "techExam" -> "技术考察";
+            case "projectDeep" -> "项目深挖";
+            case "qaRound" -> "反问环节";
+            default -> stage;
+        };
+    }
+
+    private String getFallbackFollowUp(String stage, int followUpIndex) {
+        if (stage == null) stage = "";
+        return switch (stage) {
+            case "selfIntro" -> switch (followUpIndex) {
+                case 1 -> "可以再详细介绍一下你的专业背景和学习经历吗？";
+                case 2 -> "你在大学期间有没有参与过什么项目或实践活动？";
+                default -> "请继续介绍一下你的其他经历。";
+            };
+            case "qaRound" -> "如果你暂时想不到问题，也可以聊聊你对这个岗位的期望。";
+            default -> switch (followUpIndex) {
+                case 1 -> "能否进一步深入谈谈你在技术选型时做的权衡和取舍？";
+                case 2 -> "你提到了具体的实施方案，那在面对资源限制或时间压力时，你是如何做优先级决策的？";
+                case 3 -> "这个方案在极端场景下（如流量暴增 10 倍）还能保持稳定吗？你考虑过哪些容灾措施？";
+                default -> "请继续深入分享一下你在这个技术领域的其他实践经验。";
+            };
         };
     }
 
     /**
      * 判断是否需要继续追问
-     *
-     * @param followUpCount 配置的追问次数
-     * @param currentIndex  当前追问轮次
-     * @return 是否继续
      */
     public boolean shouldContinueFollowUp(int followUpCount, int currentIndex) {
         return currentIndex < followUpCount;
@@ -82,46 +136,109 @@ public class FollowUpService {
 
     /**
      * 生成过渡到下题的面试官点评
-     * 根据候选人的回答质量，动态生成恰当的过渡语
-     *
-     * @param lastAnswer 候选人的上一条回答
-     * @param question   当前面试题目
-     * @param nextQuestion 下一道面试题目
-     * @return 过渡点评 + 下一题
      */
-    public String generateTransition(String lastAnswer, InterviewQuestion question, InterviewQuestion nextQuestion) {
+    public String generateTransition(String lastAnswer, InterviewQuestion question,
+                                      InterviewQuestion nextQuestion, String stage, int questionNumber) {
         try {
-            String prompt = buildTransitionPrompt(lastAnswer, question, nextQuestion);
+            String prompt = buildTransitionPrompt(lastAnswer, question, nextQuestion, stage, questionNumber);
             return chatClient.prompt()
                     .user(prompt)
                     .call()
                     .content();
         } catch (Exception e) {
             System.err.println("生成过渡点评失败: " + e.getMessage());
-            return getFallbackTransition(nextQuestion);
+            return getFallbackTransition(nextQuestion, stage, questionNumber);
         }
     }
 
-    private String buildTransitionPrompt(String lastAnswer, InterviewQuestion question, InterviewQuestion nextQuestion) {
+    private String buildTransitionPrompt(String lastAnswer, InterviewQuestion question,
+                                          InterviewQuestion nextQuestion, String stage, int questionNumber) {
+        String stageInstruction = getStageTransitionInstruction(stage);
         return String.format("""
-                你是一个资深技术面试官，需要根据候选人的回答进行简要点评，然后自然地引出下一道面试题。
-
+                你是一个面试官，需要根据候选人的回答进行简要点评，然后自然地引出下一道题。
+                
+                当前面试阶段：%s
                 原始问题：%s
                 候选人回答：%s
-                下一道题目：%s
-
-                要求：
-                1. 先对候选人的回答给出简短、客观的评价（10-30字），好的回答就肯定，敷衍的回答要委婉指出
-                2. 然后自然过渡到下一道题目，不要使用“非常好”等过于夸张的表扬
-                3. 如果回答极其简短（如少于10个字），应委婉表示希望听到更详细的内容
-                4. 整个回复控制在 80 字以内，简洁自然
-                5. 语气专业、友好，像一个真实的面试官
-
-                请给出面试官的发言：
-                """, question.getText(), lastAnswer, nextQuestion.getText());
+                下一道题目（第%d题）：%s
+                
+                %s
+                
+                请给出面试官的发言，开头自然地标注"第%d题："：
+                """, getStageLabel(stage), question.getText(), lastAnswer, questionNumber, nextQuestion.getText(), stageInstruction, questionNumber);
     }
 
-    private String getFallbackTransition(InterviewQuestion nextQuestion) {
-        return "感谢你的回答。接下来我们进入下一题：\n\n" + nextQuestion.getText();
+    private String getStageTransitionInstruction(String stage) {
+        if (stage == null) stage = "";
+        return switch (stage) {
+            case "selfIntro" -> """
+                要求：
+                1. 这是自我介绍环节，直接引出下一道问题，不要评价回答质量
+                2. 不要使用"感谢""非常好""回答简短"等任何评价性语言
+                3. 直接自然过渡到下一题
+                4. 整个回复控制在 30 字以内
+                """;
+            case "qaRound" -> """
+                要求：
+                1. 这是反问环节，鼓励候选人继续提问
+                2. 不要评价候选人的提问质量
+                3. 语气友好开放
+                """;
+            default -> """
+                要求：
+                1. 直接进入下一题，不要做任何评价
+                2. 不要使用"感谢""回答得好""回答简要"等评价性语言
+                3. 直接激发出下一道题
+                4. 控制在 50 字以内
+                """;
+        };
+    }
+
+    private String getFallbackTransition(InterviewQuestion nextQuestion, String stage, int questionNumber) {
+        if (stage == null) stage = "";
+        String prefix = "第" + questionNumber + "题：";
+        return switch (stage) {
+            case "selfIntro" -> prefix + nextQuestion.getText();
+            case "qaRound" -> "好的。如果你还有其他问题，可以继续问。" + prefix + nextQuestion.getText();
+            default -> prefix + "\n\n" + nextQuestion.getText();
+        };
+    }
+
+    /**
+     * 反问环节：使用AI回答候选人提出的问题
+     */
+    public String generateQaAnswer(String candidateMessage, InterviewQuestion currentQuestion) {
+        try {
+            String prompt = buildQaAnswerPrompt(candidateMessage, currentQuestion);
+            String answer = chatClient.prompt()
+                    .system("你是一个面试官，正在面试的反问环节。你的任务是认真回答候选人提出的问题，态度真诚专业。")
+                    .user(prompt)
+                    .call()
+                    .content();
+            return answer;
+        } catch (Exception e) {
+            System.err.println("生成反问回答失败: " + e.getMessage());
+            return "好的。如果你还有其他问题，可以继续问。";
+        }
+    }
+
+    private String buildQaAnswerPrompt(String candidateMessage, InterviewQuestion currentQuestion) {
+        return String.format("""
+                你是一个面试官，正在面试的反问环节。
+                
+                候选人说：%s
+                
+                当前环节的引导提示：%s
+                
+                要求：
+                1. 如果候选人提出了具体问题（关于团队、技术、公司等），请以面试官身份认真回答
+                2. 回答要专业、真诚，给出有信息量的回复
+                3. 回答完毕后，鼓励候选人继续提问："你还有其他想了解的吗？"
+                4. 如果候选人表示没有问题了（如"没有了""暂时没有"等），请回答："好的，那反问环节就到这里。系统正在为你生成评估报告..."
+                5. 如果候选人只是简单回应（如"好的"），请给出引导性问题示例帮助其提问
+                6. 整个回复控制在 200 字以内
+                
+                请给出面试官的发言：
+                """, candidateMessage, currentQuestion.getText());
     }
 }

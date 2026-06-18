@@ -10,7 +10,7 @@
 import React, { useState, useRef } from "react";
 import {
   Upload, FileText, Sparkles, AlertCircle, BarChart3,
-  CheckCircle2, ChevronRight, Play, Check, File, X
+  CheckCircle2, ChevronRight, Play, Check, File, X, Loader2, Layers
 } from "lucide-react";
 import { Candidate, CandidateStatus } from "../types";
 
@@ -50,6 +50,17 @@ export default function ResumeAnalysisView({
   // 拖拽状态 + 文件信息
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  // 批量上传
+  const [batchFiles, setBatchFiles] = useState<File[]>([]);
+  const [batchUploading, setBatchUploading] = useState(false);
+  const [batchResults, setBatchResults] = useState<{
+    fileName: string;
+    status: "success" | "duplicate" | "error";
+    message: string;
+    candidateName?: string;
+    matchScore?: number;
+  }[] | null>(null);
 
   // 进度指示
   const [progressStep, setProgressStep] = useState(0);
@@ -206,6 +217,80 @@ export default function ResumeAnalysisView({
     }
     // 重置 input 以便重复选择同一文件
     e.target.value = "";
+  };
+
+  // ==================== 批量文件选择 ====================
+
+  const handleMultiFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      setBatchFiles(Array.from(files));
+      setBatchResults(null);
+      setError(null);
+    }
+    e.target.value = "";
+  };
+
+  // ==================== 批量上传分析 ====================
+
+  const handleBatchUpload = async () => {
+    if (batchFiles.length === 0) return;
+    setBatchUploading(true);
+    setBatchResults(null);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      batchFiles.forEach(file => formData.append("files", file));
+      if (targetJob.trim()) {
+        formData.append("targetJob", targetJob.trim());
+      }
+
+      const response = await fetch(`${API_BASE}/api/resume/upload/batch`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => null);
+        throw new Error(errBody?.message || `服务器错误: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (result.code !== 200) {
+        throw new Error(result.message || "批量分析失败");
+      }
+
+      setBatchResults(result.data || []);
+
+      // 自动将成功分析的简历加入候选人列表
+      if (result.data) {
+        const successOnes = result.data.filter((r: any) => r.status === "success");
+        successOnes.forEach((item: any) => {
+          const newCand: Candidate = {
+            id: "cand_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+            name: item.candidateName || "求职者",
+            role: targetJob || "资深工程师",
+            experienceYears: 3,
+            education: "未知",
+            status: CandidateStatus.WAITING_INTERVIEW,
+            avatar: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&h=150&fit=crop&crop=face",
+            matchScore: item.matchScore || 85,
+            email: "", phone: "", resumeText: "",
+            competencies: { technical: 5, communication: 5, problemSolving: 5, teamFit: 5, drive: 5 },
+            strengths: [], weaknesses: [], highlights: [], aiSummary: "",
+            analyzedAt: new Date().toISOString().replace("T", " ").substring(0, 16)
+          };
+          onAddCandidate(newCand);
+        });
+      }
+    } catch (err: any) {
+      console.error("批量分析失败:", err);
+      setError(err.message || "批量分析失败");
+    } finally {
+      setBatchUploading(false);
+    }
   };
 
   // ==================== 重渲染 ====================
@@ -396,6 +481,103 @@ export default function ResumeAnalysisView({
                 分析此简历
               </button>
             )}
+
+            {/* 分隔线 + 批量上传区域 */}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-200" />
+              </div>
+              <div className="relative flex justify-center">
+                <span className="bg-white px-3 text-xs text-slate-400 font-sans">或</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-50/70 rounded-xl border border-slate-200 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-primary" />
+                <span className="text-sm font-semibold text-slate-700 font-sans">批量上传简历</span>
+              </div>
+
+              {/* 批量文件选择 */}
+              <input
+                type="file"
+                multiple
+                accept=".pdf,.docx,.doc,.txt"
+                onChange={handleMultiFileSelect}
+                className="hidden"
+                id="batch-file-input"
+              />
+              <label htmlFor="batch-file-input"
+                className="block text-center border-2 border-dashed border-slate-300 rounded-xl p-4 cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition">
+                <Upload className="w-5 h-5 text-slate-400 mx-auto mb-1" />
+                <p className="text-xs text-slate-500 font-sans">
+                  {batchFiles.length > 0
+                    ? `已选择 ${batchFiles.length} 个文件`
+                    : "点击选择多个文件（支持 PDF/DOCX/TXT）"}
+                </p>
+                <p className="text-[10px] text-slate-400 font-sans mt-0.5">最多 20 个文件</p>
+              </label>
+
+              {/* 已选文件列表 */}
+              {batchFiles.length > 0 && (
+                <div className="max-h-32 overflow-y-auto space-y-1">
+                  {batchFiles.map((f, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs text-slate-600 bg-white rounded-lg px-2.5 py-1.5 border border-slate-100">
+                      <span className="truncate flex-1">{f.name}</span>
+                      <span className="text-slate-400 ml-2 shrink-0">{(f.size / 1024).toFixed(0)}KB</span>
+                      <button onClick={() => setBatchFiles(prev => prev.filter((_, idx) => idx !== i))}
+                        className="ml-1.5 text-slate-300 hover:text-red-500 cursor-pointer">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 批量上传按钮 */}
+              {batchFiles.length > 0 && (
+                <button onClick={handleBatchUpload} disabled={batchUploading}
+                  className="w-full text-xs font-semibold text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20 disabled:opacity-40 py-2.5 px-4 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer">
+                  {batchUploading ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 正在分析 {batchFiles.length} 份简历...</>
+                  ) : (
+                    <><Sparkles className="w-3.5 h-3.5" /> 批量分析 {batchFiles.length} 份简历</>
+                  )}
+                </button>
+              )}
+
+              {/* 批量结果展示 */}
+              {batchResults && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                    批量分析完成
+                  </div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {batchResults.map((r, i) => (
+                      <div key={i} className={`flex items-center gap-2 text-xs p-2 rounded-lg border ${
+                        r.status === "success"
+                          ? "bg-emerald-50 border-emerald-100 text-emerald-800"
+                          : r.status === "duplicate"
+                          ? "bg-amber-50 border-amber-100 text-amber-800"
+                          : "bg-red-50 border-red-100 text-red-800"
+                      }`}>
+                        {r.status === "success" ? <CheckCircle2 className="w-3 h-3 shrink-0" />
+                          : r.status === "duplicate" ? <FileText className="w-3 h-3 shrink-0" />
+                          : <AlertCircle className="w-3 h-3 shrink-0" />}
+                        <span className="truncate flex-1">{r.fileName}</span>
+                        {r.candidateName && <span className="shrink-0">{r.candidateName}</span>}
+                        {r.matchScore && <span className="shrink-0 font-bold">{r.matchScore}分</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={() => { setBatchFiles([]); setBatchResults(null); }}
+                    className="text-xs text-primary bg-primary/5 border border-primary/20 hover:bg-primary/10 px-3 py-1.5 rounded-lg transition cursor-pointer w-full">
+                    清空结果，继续上传
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* 右侧功能介绍 */}
