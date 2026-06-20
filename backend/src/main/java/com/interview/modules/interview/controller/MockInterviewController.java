@@ -97,6 +97,15 @@ public class MockInterviewController {
             log.warn("TTS 生成失败，跳过语音: {}", e.getMessage());
         }
 
+        // 返回上一条回答的评分（异步评分延迟返回机制）
+        Integer lastScore = session.getLastScore();
+        if (lastScore != null) {
+            response.put("score", lastScore);
+            response.put("scoreFeedback", session.getLastScoreFeedback());
+            // 标记已返回，避免重复返回
+            session.setLastScore(null, null);
+        }
+
         return ResponseEntity.ok(response);
     }
 
@@ -195,6 +204,18 @@ public class MockInterviewController {
     @GetMapping("/candidates/{candidateId}/sessions")
     public ResponseEntity<List<InterviewSession>> getCandidateSessions(@PathVariable String candidateId) {
         return ResponseEntity.ok(interviewService.getCandidateSessions(candidateId));
+    }
+
+    /**
+     * 批量删除面试会话
+     */
+    @PostMapping("/sessions/batch-delete")
+    public ResponseEntity<Map<String, Object>> batchDeleteSessions(@RequestBody List<String> sessionIds) {
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "sessionIds 不能为空"));
+        }
+        int deleted = interviewService.batchDeleteSessions(sessionIds);
+        return ResponseEntity.ok(Map.of("deleted", deleted));
     }
 
     /**

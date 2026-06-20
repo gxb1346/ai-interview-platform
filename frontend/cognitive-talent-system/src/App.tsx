@@ -185,6 +185,22 @@ export default function App() {
     setScoreCards((prev) => prev.filter((c) => c.id !== cardId));
   };
 
+  // 批量删除面试记录
+  const handleBatchDeleteScoreCards = async (cardIds: string[]) => {
+    try {
+      // 调用后端 API 批量删除
+      await authFetch(`${API_BASE}/api/mock-interview/sessions/batch-delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cardIds),
+      });
+    } catch (e) {
+      console.warn("批量删除后端 API 调用失败，仅清除前端数据:", e);
+    }
+    // 清除前端数据
+    setScoreCards((prev) => prev.filter((c) => !cardIds.includes(c.id)));
+  };
+
   // 从后端拉取面试会话列表
   const refreshInterviewSessions = async () => {
     try {
@@ -496,7 +512,7 @@ export default function App() {
             )}
 
             {currentView === "INTERVIEW_RECORDS" && (
-              <InterviewRecordsView scoreCards={scoreCards} onDeleteScoreCard={handleDeleteScoreCard} />
+              <InterviewRecordsView scoreCards={scoreCards} onDeleteScoreCard={handleDeleteScoreCard} onBatchDeleteScoreCards={handleBatchDeleteScoreCards} />
             )}
 
             {currentView === "SCHEDULE" && (

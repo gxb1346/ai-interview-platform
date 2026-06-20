@@ -1,5 +1,8 @@
 package com.interview.modules.interview.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -8,6 +11,7 @@ import java.util.List;
 /**
  * 面试会话（Redis 持久化，支持断点续面）
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class InterviewSession implements Serializable {
 
     private String sessionId;
@@ -44,6 +48,11 @@ public class InterviewSession implements Serializable {
 
     /** 当前题目已追问次数（切换题目后重置为 0） */
     private int followUpIndex;
+
+    /** 待返回的评分（上一轮异步评分的结果，在下一次回答时返回） */
+    private Integer lastScore;
+    /** 待返回的评分简要反馈 */
+    private String lastScoreFeedback;
 
     /** 时间戳 */
     private LocalDateTime createdAt;
@@ -161,4 +170,31 @@ public class InterviewSession implements Serializable {
     public boolean isQuestionAsked(String questionId) {
         return this.askedQuestionIds.contains(questionId);
     }
+
+    /**
+     * 获取最近一条尚未评分的候选人回答（用于异步评分后返回）
+     */
+    @JsonIgnore
+    public InterviewMessage getPendingScoreMessage() {
+        if (messages == null) return null;
+        // 从后往前找最近一条候选人消息，如果它有 score 说明已评分，没有则待评分
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            InterviewMessage msg = messages.get(i);
+            if ("candidate".equals(msg.getSender()) && msg.getScore() != null) {
+                return msg; // 已评分，返回给前端
+            }
+        }
+        return null;
+    }
+
+    public void setLastScore(Integer score, String feedback) {
+        this.lastScore = score;
+        this.lastScoreFeedback = feedback;
+    }
+
+    public Integer getLastScore() { return lastScore; }
+    public void setLastScore(Integer lastScore) { this.lastScore = lastScore; }
+
+    public String getLastScoreFeedback() { return lastScoreFeedback; }
+    public void setLastScoreFeedback(String lastScoreFeedback) { this.lastScoreFeedback = lastScoreFeedback; }
 }

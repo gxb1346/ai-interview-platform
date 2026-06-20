@@ -1,6 +1,7 @@
 package com.interview.modules.interview.service;
 
 import com.interview.modules.interview.model.InterviewQuestion;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
@@ -8,8 +9,14 @@ import org.springframework.stereotype.Service;
  * 智能追问服务
  * 支持按面试阶段生成差异化追问和过渡语
  */
+@Slf4j
 @Service
 public class FollowUpService {
+
+    // AI 调用最大重试次数
+    private static final int AI_MAX_RETRIES = 2;
+    // AI 调用重试间隔（毫秒）
+    private static final long AI_RETRY_DELAY_MS = 800;
 
     private final ChatClient chatClient;
 
@@ -17,6 +24,32 @@ public class FollowUpService {
         this.chatClient = chatClientBuilder
                 .defaultSystem("你是一个面试官，善于根据候选人的回答进行恰当追问。")
                 .build();
+    }
+
+    /**
+     * 带重试的 AI 调用
+     */
+    private String callAiWithRetry(String prompt, String callType) {
+        Exception lastException = null;
+        for (int attempt = 0; attempt <= AI_MAX_RETRIES; attempt++) {
+            try {
+                if (attempt > 0) {
+                    log.info("AI {} 重试 {}/{}", callType, attempt, AI_MAX_RETRIES);
+                    Thread.sleep(AI_RETRY_DELAY_MS);
+                }
+                return chatClient.prompt()
+                        .user(prompt)
+                        .call()
+                        .content();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("AI调用被中断", e);
+            } catch (Exception e) {
+                lastException = e;
+                log.warn("AI {} 第{}次调用失败: {}", callType, attempt + 1, e.getMessage());
+            }
+        }
+        throw new RuntimeException("AI " + callType + " 所有重试均失败", lastException);
     }
 
     /**
@@ -31,12 +64,9 @@ public class FollowUpService {
     public String generateFollowUp(String lastAnswer, InterviewQuestion question, int followUpIndex, String stage) {
         try {
             String prompt = buildFollowUpPrompt(lastAnswer, question, followUpIndex, stage);
-            return chatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
+            return callAiWithRetry(prompt, "追问");
         } catch (Exception e) {
-            System.err.println("生成追问失败: " + e.getMessage());
+            log.warn("生成追问失败，使用fallback: {}", e.getMessage());
             return getFallbackFollowUp(stage, followUpIndex);
         }
     }
@@ -141,12 +171,9 @@ public class FollowUpService {
                                       InterviewQuestion nextQuestion, String stage, int questionNumber) {
         try {
             String prompt = buildTransitionPrompt(lastAnswer, question, nextQuestion, stage, questionNumber);
-            return chatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
+            return callAiWithRetry(prompt, "过渡语");
         } catch (Exception e) {
-            System.err.println("生成过渡点评失败: " + e.getMessage());
+            log.warn("生成过渡点评失败，使用fallback: {}", e.getMessage());
             return getFallbackTransition(nextQuestion, stage, questionNumber);
         }
     }
@@ -210,14 +237,9 @@ public class FollowUpService {
     public String generateQaAnswer(String candidateMessage, InterviewQuestion currentQuestion) {
         try {
             String prompt = buildQaAnswerPrompt(candidateMessage, currentQuestion);
-            String answer = chatClient.prompt()
-                    .system("你是一个面试官，正在面试的反问环节。你的任务是认真回答候选人提出的问题，态度真诚专业。")
-                    .user(prompt)
-                    .call()
-                    .content();
-            return answer;
+            return callAiWithRetry(prompt, "反问回答");
         } catch (Exception e) {
-            System.err.println("生成反问回答失败: " + e.getMessage());
+            log.warn("生成反问回答失败，使用fallback: {}", e.getMessage());
             return "好的。如果你还有其他问题，可以继续问。";
         }
     }

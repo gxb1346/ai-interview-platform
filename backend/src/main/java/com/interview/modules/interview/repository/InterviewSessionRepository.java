@@ -57,12 +57,16 @@ public class InterviewSessionRepository {
         try {
             String sessionKey = sessionKey(sessionId);
             String json = redisTemplate.opsForValue().get(sessionKey);
-            if (json == null) return Optional.empty();
+            if (json == null) {
+                System.err.println("[Redis] 会话不存在: " + sessionId);
+                return Optional.empty();
+            }
             // 访问时续期 TTL，避免活跃会话过期
             redisTemplate.expire(sessionKey, SESSION_TTL_HOURS, TimeUnit.HOURS);
             InterviewSession session = objectMapper.readValue(json, InterviewSession.class);
             return Optional.of(session);
         } catch (Exception e) {
+            System.err.println("[Redis] 会话反序列化失败: " + sessionId + " - " + e.getMessage());
             return Optional.empty();
         }
     }
@@ -129,6 +133,16 @@ public class InterviewSessionRepository {
                 String indexKey = candidateIndexKey(session.getCandidateId());
                 redisTemplate.opsForSet().remove(indexKey, sessionId);
             }
+        }
+    }
+
+    /**
+     * 批量删除会话
+     */
+    public void deleteByIds(List<String> sessionIds) {
+        if (sessionIds == null || sessionIds.isEmpty()) return;
+        for (String sessionId : sessionIds) {
+            deleteById(sessionId);
         }
     }
 

@@ -9,7 +9,10 @@ import com.itextpdf.layout.Document;
 import com.itextpdf.layout.element.Paragraph;
 import com.itextpdf.layout.element.Table;
 import com.itextpdf.layout.properties.UnitValue;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -28,72 +31,87 @@ import java.util.concurrent.CompletableFuture;
 @Service
 public class PdfExportService {
 
+    private static final Logger log = LoggerFactory.getLogger(PdfExportService.class);
+
     @Value("${app.pdf.export-path:./reports}")
     private String exportPath;
 
-    private static final String[] FONT_ASIAN_PATHS = {
-        // iText font-asian 可能的路径（8.0.5 移除了 NotoSansSC，改用 STSong-Light）
-        "META-INF/resources/webjars/font-asian/8.0.5/STSong-Light.ttf",
-        "com/itextpdf/font/asian/STSong-Light.ttf",
-        "com/itextpdf/font/asian/NotoSansSC-Regular.otf",
-        "META-INF/resources/webjars/font-asian/8.0.5/NotoSansSC-Regular.otf"
-    };
-
-    private static final String[] FONT_FALLBACK_PATHS = {
-        // Windows 10/11 中文字体（TTC集合字体，需指定索引0）
+    /** 系统字体路径（Windows 优先，最可靠） */
+    private static final String[] SYSTEM_FONT_PATHS = {
         "C:/Windows/Fonts/msyh.ttc",
         "C:/Windows/Fonts/simsun.ttc",
         "C:/Windows/Fonts/simhei.ttf",
         "C:/Windows/Fonts/simkai.ttf",
         "C:/Windows/Fonts/simfang.ttf",
-        "C:/Windows/Fonts/msyhbd.ttc",
-        "C:/Windows/Fonts/msyhl.ttc",
-        "C:/Windows/Fonts/simsunb.ttf",
-        "C:/Windows/Fonts/SimsunExtG.ttf",
-        "C:/Windows/Fonts/SIMYOU.TTF",
-        "C:/Windows/Fonts/SIMLI.TTF",
-        // 其他备选路径
-        "C:/Windows/Fonts/yahei.ttf",
+        "C:/Windows/Fonts/SimSun.ttf",
         "C:/Windows/Fonts/msyh.ttf",
-        "C:/Windows/Fonts/SimSun.ttf"
+        "C:/Windows/Fonts/yahei.ttf",
+    };
+
+    /** classpath 中的字体文件（静态资源） */
+    private static final String[] CLASSPATH_FONT_PATHS = {
+        "static/NotoSansSC-Regular.otf",
+        "fonts/NotoSansSC-Regular.otf",
+        "fonts/STSong-Light.ttf",
+    };
+
+    /** font-asian JAR 中的字体路径（最后尝试） */
+    private static final String[] FONT_ASIAN_PATHS = {
+        "META-INF/resources/webjars/font-asian/8.0.5/STSong-Light.ttf",
+        "com/itextpdf/font/asian/STSong-Light.ttf",
     };
 
     private PdfFont loadChineseFont() {
-        // 1. 依次尝试 font-asian 库中的路径
-        for (String path : FONT_ASIAN_PATHS) {
-            try {
-                PdfFont font = PdfFontFactory.createFont(path, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
-                System.out.println("PDF 字体加载成功: " + path);
-                return font;
-            } catch (Exception e) {
-                System.err.println("font-asian 路径加载失败: " + path + " - " + e.getMessage());
-            }
-        }
-        // 2. 尝试使用系统字体
+        // 优先级：系统字体 → classpath 静态资源 → font-asian JAR → 扫描 Windows Fonts 目录
+
+        // 1. 系统字体（Windows 最可靠，优先尝试）
         PdfFont sysFont = loadSystemFont();
         if (sysFont != null) return sysFont;
 
-        // 3. 最后兜底：扫描 Windows Fonts 目录
+        // 2. classpath 静态资源（项目内嵌字体）
+        for (String path : CLASSPATH_FONT_PATHS) {
+            try {
+                ClassPathResource resource = new ClassPathResource(path);
+                if (resource.exists()) {
+                    PdfFont font = PdfFontFactory.createFont(
+                            resource.getInputStream().readAllBytes(),
+                            PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                    log.info("PDF 字体加载成功(classpath): {}", path);
+                    return font;
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // 3. font-asian JAR 中的字体
+        for (String path : FONT_ASIAN_PATHS) {
+            try {
+                PdfFont font = PdfFontFactory.createFont(path, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                log.info("PDF 字体加载成功(font-asian): {}", path);
+                return font;
+            } catch (Exception ignored) {}
+        }
+
+        // 4. 最后兜底：扫描 Windows Fonts 目录
         PdfFont scannedFont = scanWindowsFontsDir();
         if (scannedFont != null) return scannedFont;
 
-        System.err.println("所有字体加载失败: 未找到可用的中文字体");
+        log.error("所有字体加载失败: 未找到可用的中文字体，PDF 将使用默认字体");
         return null;
     }
 
-    /** 尝试加载系统字体列表中的字体 */
+    /** 尝试加载系统字体 */
     private PdfFont loadSystemFont() {
-        for (String path : FONT_FALLBACK_PATHS) {
+        for (String path : SYSTEM_FONT_PATHS) {
+            File file = new File(path);
+            if (!file.exists()) continue;
             try {
-                if (new File(path).exists()) {
-                    String fontName = path.toLowerCase();
-                    String loadPath = fontName.endsWith(".ttc") ? path + ",0" : path;
-                    PdfFont font = PdfFontFactory.createFont(loadPath, PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
-                    System.out.println("PDF 系统字体加载成功: " + path);
-                    return font;
-                }
-            } catch (Exception e2) {
-                System.err.println("系统字体加载失败: " + path + " - " + e2.getMessage());
+                String fontName = path.toLowerCase();
+                String loadPath = fontName.endsWith(".ttc") ? path + ",0" : path;
+                PdfFont font = PdfFontFactory.createFont(loadPath, PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
+                log.info("PDF 系统字体加载成功: {}", path);
+                return font;
+            } catch (Exception e) {
+                log.debug("系统字体加载失败: {} - {}", path, e.getMessage());
             }
         }
         return null;
@@ -128,7 +146,7 @@ public class PdfExportService {
                     }
                     String loadPath = lower.endsWith(".ttc") ? path + ",0" : path;
                     PdfFont font = PdfFontFactory.createFont(loadPath, PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
-                    System.out.println("PDF 扫描字体加载成功: " + path);
+                    log.info("PDF 扫描字体加载成功: {}", path);
                     return font;
                 } catch (Exception ignored) {}
             }
@@ -163,7 +181,7 @@ public class PdfExportService {
             generatePdf(report, filePath);
             return CompletableFuture.completedFuture(filePath);
         } catch (Exception e) {
-            System.err.println("PDF 导出失败: " + e.getMessage());
+            log.error("PDF 导出失败: {}", e.getMessage());
             return CompletableFuture.failedFuture(e);
         }
     }
@@ -174,7 +192,9 @@ public class PdfExportService {
              Document document = new Document(pdf)) {
 
             PdfFont font = loadChineseFont();
-            System.out.println("PDF 字体加载" + (font != null ? "成功" : "失败，将使用默认字体"));
+            if (font == null) {
+                log.warn("未找到中文字体，PDF 将使用默认字体（可能无法显示中文）");
+            }
 
             // 标题
             addParagraph(document, "模拟面试评估报告", font, 22, true);

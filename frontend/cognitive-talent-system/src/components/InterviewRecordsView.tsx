@@ -1,17 +1,19 @@
 import React, { useState } from "react";
-import { Search, Trophy, ShieldCheck, HelpCircle, X, Clock, Award, Star, AlertTriangle, FileSpreadsheet, Trash2 } from "lucide-react";
+import { Search, Trophy, ShieldCheck, HelpCircle, X, Clock, Award, Star, AlertTriangle, FileSpreadsheet, Trash2, CheckSquare, Square } from "lucide-react";
 import { ScoreCard } from "../types";
 
 interface InterviewRecordsViewProps {
   scoreCards: ScoreCard[];
   onDeleteScoreCard: (cardId: string) => void;
+  onBatchDeleteScoreCards: (cardIds: string[]) => void;
 }
 
-export default function InterviewRecordsView({ scoreCards, onDeleteScoreCard }: InterviewRecordsViewProps) {
+export default function InterviewRecordsView({ scoreCards, onDeleteScoreCard, onBatchDeleteScoreCards }: InterviewRecordsViewProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedVerdict, setSelectedVerdict] = useState<string>("ALL");
   const [activeCard, setActiveCard] = useState<ScoreCard | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBatchConfirm, setShowBatchConfirm] = useState(false);
 
   // Filter history records based on search and verdict tag selection
   const filteredRecords = scoreCards.filter((card) => {
@@ -34,6 +36,33 @@ export default function InterviewRecordsView({ scoreCards, onDeleteScoreCard }: 
       default:
         return "bg-red-50 text-red-700 border-red-150";
     }
+  };
+
+  // 切换单个卡片选中状态
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // 全选/取消全选
+  const toggleSelectAll = () => {
+    const allIds = filteredRecords.map(c => c.id);
+    if (allIds.every(id => selectedIds.has(id))) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(allIds));
+    }
+  };
+
+  // 执行批量删除
+  const handleBatchDelete = () => {
+    onBatchDeleteScoreCards(Array.from(selectedIds));
+    setSelectedIds(new Set());
+    setShowBatchConfirm(false);
   };
 
   return (
@@ -87,15 +116,52 @@ export default function InterviewRecordsView({ scoreCards, onDeleteScoreCard }: 
         </div>
       </div>
 
+      {/* 批量操作栏 */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleSelectAll}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition cursor-pointer flex items-center gap-1.5"
+          >
+            {filteredRecords.length > 0 && filteredRecords.every(c => selectedIds.has(c.id))
+              ? <CheckSquare className="w-3.5 h-3.5 text-primary" />
+              : <Square className="w-3.5 h-3.5 text-slate-400" />
+            }
+            全选
+          </button>
+          <span className="text-xs text-slate-400">
+            {selectedIds.size > 0 ? `已选 ${selectedIds.size} 条` : ''}
+          </span>
+        </div>
+        {selectedIds.size > 0 && (
+          <button
+            onClick={() => setShowBatchConfirm(true)}
+            className="text-xs font-semibold px-4 py-2 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition cursor-pointer flex items-center gap-1.5"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            批量删除 ({selectedIds.size})
+          </button>
+        )}
+      </div>
+
       {/* Record Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredRecords.map((card) => (
           <div
             key={card.id}
-            onClick={() => setActiveCard(card)}
-            className="bg-white/80 hover:bg-white backdrop-blur-md p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between hover:scale-[1.01] duration-200"
+            className="bg-white/80 hover:bg-white backdrop-blur-md p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between hover:scale-[1.01] duration-200 relative"
           >
-            <div className="space-y-4">
+            {/* 选择框 */}
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleSelect(card.id); }}
+              className="absolute top-3 right-3 w-6 h-6 flex items-center justify-center rounded-md hover:bg-slate-100 transition z-10 cursor-pointer"
+            >
+              {selectedIds.has(card.id)
+                ? <CheckSquare className="w-4 h-4 text-primary" />
+                : <Square className="w-4 h-4 text-slate-300" />
+              }
+            </button>
+            <div className="space-y-4" onClick={() => setActiveCard(card)}>
               {/* Header profile row */}
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -283,6 +349,35 @@ export default function InterviewRecordsView({ scoreCards, onDeleteScoreCard }: 
                 className="font-sans text-xs bg-primary/10 text-primary font-bold hover:bg-primary/20 py-2 px-5 rounded-lg transition shadow-sm border border-primary cursor-pointer"
               >
                 关闭档案
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 批量删除确认弹窗 */}
+      {showBatchConfirm && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl p-6 space-y-4 border border-slate-200 shadow-2xl">
+            <div className="text-center">
+              <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-2" />
+              <h3 className="text-lg font-bold text-slate-800">确认批量删除</h3>
+              <p className="text-sm text-slate-500 mt-1">
+                确定要删除选中的 <span className="font-bold text-red-600">{selectedIds.size}</span> 条面试记录吗？此操作不可恢复。
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowBatchConfirm(false)}
+                className="flex-1 text-xs font-semibold py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 transition cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleBatchDelete}
+                className="flex-1 text-xs font-semibold py-2.5 rounded-xl bg-red-600 text-white hover:bg-red-700 transition cursor-pointer"
+              >
+                确认删除
               </button>
             </div>
           </div>

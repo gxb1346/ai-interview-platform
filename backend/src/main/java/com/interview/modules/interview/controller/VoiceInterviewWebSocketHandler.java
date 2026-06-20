@@ -1,51 +1,49 @@
 package com.interview.modules.interview.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.interview.modules.interview.model.InterviewSession;
-import com.interview.modules.interview.service.AudioService;
-import com.interview.modules.interview.service.MockInterviewService;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.*;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static com.interview.modules.interview.model.StageConfig.STAGE_SELF_INTRO;
-
 /**
  * 语音面试 WebSocket 处理器
- * 语音面试使用 WebSocket 实现实时双向通信
+ * 统一转发模式：ASR 识别结果 → REST /chat 处理 → 返回结果给 WebSocket 客户端
+ * 与路径A（前端 ASR → REST chat）共享同一套后端逻辑
  */
+@Slf4j
 @Component
 public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler {
 
-    private final MockInterviewService interviewService;
-    private final AudioService audioService;
     private final ObjectMapper objectMapper;
+    private final Gson gson = new Gson();
+    private final RestTemplate restTemplate = new RestTemplate();
 
     /** 管理活跃 WebSocket 连接：sessionId -> WebSocketSession */
     private final Map<String, WebSocketSession> activeSessions = new ConcurrentHashMap<>();
 
-    public VoiceInterviewWebSocketHandler(MockInterviewService interviewService,
-                                          AudioService audioService,
-                                          ObjectMapper objectMapper) {
-        this.interviewService = interviewService;
-        this.audioService = audioService;
+    /** 后端 REST API 地址 */
+    private static final String BACKEND_CHAT_URL = "http://localhost:8082/api/mock-interview/sessions/%s/chat";
+
+    public VoiceInterviewWebSocketHandler(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        // 连接建立时，session 的 URI 中应包含 sessionId
-        // 格式: /ws/voice-interview/{sessionId}
         String path = session.getUri().getPath();
         String sessionId = extractSessionId(path);
         if (sessionId != null) {
             activeSessions.put(sessionId, session);
-            System.out.println("WebSocket 连接已建立: sessionId=" + sessionId);
+            log.info("WebSocket 语音面试连接建立: sessionId={}", sessionId);
         }
     }
 
@@ -59,88 +57,73 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler {
             String sessionId = (String) data.getOrDefault("sessionId", "");
 
             switch (type) {
-                case "START" -> handleStart(session, sessionId);
-                case "ANSWER" -> {
-                    String answer = (String) data.getOrDefault("answer", "");
-                    handleAnswer(session, sessionId, answer);
-                }
-                case "END" -> handleEnd(session, sessionId);
+                case "ASR_RESULT" -> handleAsrResult(session, sessionId, data);
                 case "PING" -> sendMessage(session, Map.of("type", "PONG"));
                 default -> sendMessage(session, Map.of("type", "ERROR", "message", "未知消息类型: " + type));
             }
         } catch (Exception e) {
-            sendMessage(session, Map.of("type", "ERROR", "message", "处理消息失败: " + e.getMessage()));
+            log.error("WebSocket 消息处理失败: {}", e.getMessage());
+            sendMessage(session, Map.of("type", "ERROR", "message", "处理失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 处理 ASR 识别结果：转发到 REST /chat 端点
+     */
+    private void handleAsrResult(WebSocketSession session, String sessionId, Map<String, Object> data) throws IOException {
+        try {
+            String text = (String) data.getOrDefault("text", "");
+            if (text.isBlank()) {
+                sendMessage(session, Map.of("type", "ERROR", "message", "识别文本为空"));
+                return;
+            }
+
+            // 转发到 REST /chat 端点
+            String chatUrl = String.format(BACKEND_CHAT_URL, sessionId);
+            JsonObject chatBody = new JsonObject();
+            chatBody.addProperty("answer", text);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<String> request = new HttpEntity<>(chatBody.toString(), headers);
+
+            ResponseEntity<String> response = restTemplate.postForEntity(chatUrl, request, String.class);
+
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                JsonObject replyJson = gson.fromJson(response.getBody(), JsonObject.class);
+
+                // 将 REST 响应包装为 WebSocket 消息格式
+                JsonObject wsMsg = new JsonObject();
+                wsMsg.addProperty("type", "INTERVIEWER_REPLY");
+                wsMsg.addProperty("sessionId", sessionId);
+                wsMsg.addProperty("reply", replyJson.get("reply").getAsString());
+                wsMsg.addProperty("currentStage", replyJson.get("currentStage").getAsString());
+                wsMsg.addProperty("status", replyJson.get("status").getAsString());
+
+                if (replyJson.has("audio")) {
+                    wsMsg.addProperty("audio", replyJson.get("audio").getAsString());
+                }
+                if (replyJson.has("score")) {
+                    wsMsg.addProperty("score", replyJson.get("score").getAsInt());
+                    wsMsg.addProperty("scoreFeedback", replyJson.get("scoreFeedback").getAsString());
+                }
+
+                session.sendMessage(new TextMessage(wsMsg.toString()));
+                log.info("语音面试转发成功: sessionId={}, textLen={}", sessionId, text.length());
+            } else {
+                log.warn("REST /chat 返回非成功状态: {}", response.getStatusCode());
+                sendMessage(session, Map.of("type", "ERROR", "message", "面试处理失败"));
+            }
+        } catch (Exception e) {
+            log.error("语音面试转发失败: sessionId={}, error={}", sessionId, e.getMessage());
+            sendMessage(session, Map.of("type", "ERROR", "message", "处理失败: " + e.getMessage()));
         }
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         activeSessions.values().remove(session);
-        System.out.println("WebSocket 连接已关闭: " + status);
-    }
-
-    private void handleStart(WebSocketSession session, String sessionId) throws IOException {
-        InterviewSession interviewSession = interviewService.startInterview(sessionId);
-
-        String firstMessage = interviewSession.getMessages().isEmpty()
-                ? "" : interviewSession.getMessages().get(0).getText();
-
-        Map<String, Object> responseData = new HashMap<>();
-        responseData.put("type", "STARTED");
-        responseData.put("sessionId", sessionId);
-        responseData.put("firstMessage", firstMessage);
-        responseData.put("currentStage", STAGE_SELF_INTRO);
-        responseData.put("questions", interviewSession.getQuestions().stream()
-                .map(q -> Map.of("id", q.getId(), "text", q.getText()))
-                .toList());
-
-        // 开场白也生成语音
-        if (!firstMessage.isEmpty()) {
-            String audioBase64 = audioService.textToSpeechBase64(firstMessage);
-            if (audioBase64 != null) {
-                responseData.put("audio", audioBase64);
-            }
-        }
-
-        sendMessage(session, responseData);
-    }
-
-    private void handleAnswer(WebSocketSession session, String sessionId, String answer) throws IOException {
-        InterviewSession interviewSession = interviewService.processAnswer(sessionId, answer);
-
-        var messages = interviewSession.getMessages();
-        String reply = messages.isEmpty() ? "" : messages.get(messages.size() - 1).getText();
-
-        Map<String, Object> responseData = new HashMap<>();
-        responseData.put("type", "REPLY");
-        responseData.put("sessionId", sessionId);
-        responseData.put("reply", reply);
-        responseData.put("currentRound", interviewSession.getCurrentRound());
-        responseData.put("currentQuestionIndex", interviewSession.getCurrentQuestionIndex());
-        responseData.put("totalQuestions", interviewSession.getQuestions() == null ? 0 : interviewSession.getQuestions().size());
-        responseData.put("status", interviewSession.getStatus());
-
-        // 标记是否需要自动触发评估
-        if ("COMPLETED".equals(interviewSession.getStatus())) {
-            responseData.put("needsEvaluation", true);
-        }
-
-        // 语音面试模式下，同步生成语音回复
-        String audioBase64 = audioService.textToSpeechBase64(reply);
-        if (audioBase64 != null) {
-            responseData.put("audio", audioBase64);
-        }
-
-        sendMessage(session, responseData);
-    }
-
-    private void handleEnd(WebSocketSession session, String sessionId) throws IOException {
-        interviewService.endInterview(sessionId);
-        sendMessage(session, Map.of(
-                "type", "ENDED",
-                "sessionId", sessionId
-        ));
-        session.close(CloseStatus.NORMAL);
+        log.info("WebSocket 语音面试连接关闭: {}", status);
     }
 
     private void sendMessage(WebSocketSession session, Map<String, Object> data) throws IOException {

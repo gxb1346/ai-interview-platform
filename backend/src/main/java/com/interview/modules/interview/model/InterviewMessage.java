@@ -13,6 +13,8 @@ public class InterviewMessage implements Serializable {
     private String text;
     private String stage;       // 所属面试阶段
     private int roundNumber;    // 第几轮对话
+    private Integer score;      // 实时评分（仅候选人回答有值，0-100）
+    private String scoreFeedback; // 评分简要反馈
     private LocalDateTime timestamp;
 
     public InterviewMessage() {
@@ -41,6 +43,12 @@ public class InterviewMessage implements Serializable {
 
     public int getRoundNumber() { return roundNumber; }
     public void setRoundNumber(int roundNumber) { this.roundNumber = roundNumber; }
+
+    public Integer getScore() { return score; }
+    public void setScore(Integer score) { this.score = score; }
+
+    public String getScoreFeedback() { return scoreFeedback; }
+    public void setScoreFeedback(String scoreFeedback) { this.scoreFeedback = scoreFeedback; }
 
     public LocalDateTime getTimestamp() { return timestamp; }
     public void setTimestamp(LocalDateTime timestamp) { this.timestamp = timestamp; }

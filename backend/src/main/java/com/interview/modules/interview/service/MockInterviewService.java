@@ -1,7 +1,10 @@
 package com.interview.modules.interview.service;
 
+import com.interview.modules.evaluation.engine.UnifiedEvaluationEngine;
+import com.interview.modules.evaluation.model.EvaluationReport;
 import com.interview.modules.interview.model.*;
 import com.interview.modules.interview.repository.InterviewSessionRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -13,6 +16,7 @@ import java.util.stream.Collectors;
  * 模拟面试主流程编排服务
  * 统筹出题、对话、追问、结束全流程
  */
+@Slf4j
 @Service
 public class MockInterviewService {
 
@@ -21,17 +25,23 @@ public class MockInterviewService {
     private final JDParseService jdParseService;
     private final DirectionRecommendService directionRecommendService;
     private final InterviewSessionRepository sessionRepository;
+    private final RealTimeScoreService realTimeScoreService;
+    private final UnifiedEvaluationEngine evaluationEngine;
 
     public MockInterviewService(QuestionGeneratorService questionGenerator,
                                 FollowUpService followUpService,
                                 JDParseService jdParseService,
                                 DirectionRecommendService directionRecommendService,
-                                InterviewSessionRepository sessionRepository) {
+                                InterviewSessionRepository sessionRepository,
+                                RealTimeScoreService realTimeScoreService,
+                                UnifiedEvaluationEngine evaluationEngine) {
         this.questionGenerator = questionGenerator;
         this.followUpService = followUpService;
         this.jdParseService = jdParseService;
         this.directionRecommendService = directionRecommendService;
         this.sessionRepository = sessionRepository;
+        this.realTimeScoreService = realTimeScoreService;
+        this.evaluationEngine = evaluationEngine;
     }
 
     /**
@@ -180,6 +190,40 @@ public class MockInterviewService {
         answerMsg.setRoundNumber(currentRound);
         session.addMessage(answerMsg);
 
+        // 实时评分（异步执行，不阻塞面试流程，结果在下一次回答时返回）
+        // 先获取上一次评分结果（如果有的话）
+        final InterviewMessage previousAnswerMsg = session.getPendingScoreMessage();
+        if (previousAnswerMsg != null) {
+            session.setLastScore(previousAnswerMsg.getScore(), previousAnswerMsg.getScoreFeedback());
+        }
+
+        // 对本次回答启动异步评分（独立加载 session 避免竞态条件）
+        final String currentQuestion = session.getQuestions().get(session.getCurrentQuestionIndex()).getText();
+        final String answerMsgId = answerMsg.getId();
+        new Thread(() -> {
+            try {
+                RealTimeScoreService.ScoreResult result = realTimeScoreService
+                        .scoreAnswer(currentQuestion, candidateAnswer, session.getCurrentStage());
+                if (result != null) {
+                    // 重新加载 session 避免竞态条件
+                    InterviewSession freshSession = sessionRepository.findById(sessionId).orElse(null);
+                    if (freshSession != null) {
+                        freshSession.getMessages().stream()
+                                .filter(m -> answerMsgId.equals(m.getId()))
+                                .findFirst()
+                                .ifPresent(msg -> {
+                                    msg.setScore(result.score);
+                                    msg.setScoreFeedback(result.feedback);
+                                });
+                        sessionRepository.save(freshSession);
+                        log.info("实时评分完成: score={}, feedback={}", result.score, result.feedback);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("实时评分异步失败: {}", e.getMessage());
+            }
+        }, "tts-score-worker").start();
+
         // 标记当前题目为已答（仅初次作答时标记，追问不重复标记）
         int qi = session.getCurrentQuestionIndex();
         int fi = session.getFollowUpIndex();
@@ -279,18 +323,35 @@ public class MockInterviewService {
     }
 
     /**
-     * 检测候选人是否表示结束当前环节
+     * 检测候选人是否表示结束反问环节
+     * 匹配"没有/不要/不/没/无/pass"等表示拒绝、无问题、结束的短词
      */
     private boolean isEndingMessage(String message) {
         if (message == null || message.isBlank()) return false;
         String t = message.trim();
-        return t.equals("没有了") || t.equals("没有") || t.equals("暂时没有")
-            || t.contains("没有问题了") || t.contains("没问题了")
-            || t.equals("结束") || t.equals("不问了")
+        String lower = t.toLowerCase();
+
+        // 精确匹配：短词拒绝/结束信号
+        if (t.length() <= 4) {
+            return t.equals("没有") || t.equals("没了") || t.equals("没有了")
+                || t.equals("没") || t.equals("不") || t.equals("无")
+                || t.equals("不用") || t.equals("不要") || t.equals("不了")
+                || t.equals("算") || t.equals("算了") || t.equals("免了")
+                || t.equals("不必") || t.equals("不问了") || t.equals("不需要")
+                || t.equals("跳过") || t.equals("结束")
+                || t.equals("暂时没有") || t.equals("pass")
+                || lower.equals("no") || lower.equals("nope") || lower.equals("nah");
+        }
+
+        // 包含匹配：长短语
+        return t.contains("没有问题了") || t.contains("没问题了")
             || t.contains("就到这里") || t.contains("没有其他")
             || t.contains("结束面试") || t.contains("生成报告") || t.contains("评估报告")
             || t.contains("结束吧") || t.contains("可以了") || t.contains("到此为止")
-            || t.contains("交卷") || t.contains("就这些") || t.contains("完成了");
+            || t.contains("交卷") || t.contains("就这些") || t.contains("完成了")
+            || t.contains("不需要了") || t.contains("没什么问题") || t.contains("没啥问题")
+            || t.contains("没有想问") || t.contains("没有要问") || t.contains("没什么问")
+            || t.contains("不想问了") || t.contains("不问了");
     }
 
     private String getFallbackTransition(InterviewQuestion nextQ, String stage, int questionNumber) {
@@ -449,7 +510,7 @@ public class MockInterviewService {
     }
 
     /**
-     * 结束面试
+     * 结束面试（自动触发评估）
      */
     public InterviewSession endInterview(String sessionId) {
         InterviewSession session = sessionRepository.findById(sessionId)
@@ -457,6 +518,19 @@ public class MockInterviewService {
         session.setStatus("COMPLETED");
         session.setCompletedAt(java.time.LocalDateTime.now());
         sessionRepository.save(session);
+
+        // 自动触发评估（异步，不阻塞主流程）
+        new Thread(() -> {
+            try {
+                log.info("面试结束，自动触发评估: sessionId={}", sessionId);
+                EvaluationReport report = evaluationEngine.evaluate(session);
+                log.info("评估完成: sessionId={}, overallScore={}, verdict={}",
+                        sessionId, report.getOverallScore(), report.getVerdict());
+            } catch (Exception e) {
+                log.error("自动评估失败: sessionId={}, error={}", sessionId, e.getMessage());
+            }
+        }).start();
+
         return session;
     }
 
@@ -500,6 +574,15 @@ public class MockInterviewService {
      */
     public List<InterviewSession> getCandidateSessions(String candidateId) {
         return sessionRepository.findByCandidateId(candidateId);
+    }
+
+    /**
+     * 批量删除面试会话
+     */
+    public int batchDeleteSessions(List<String> sessionIds) {
+        log.info("批量删除面试会话: count={}", sessionIds.size());
+        sessionRepository.deleteByIds(sessionIds);
+        return sessionIds.size();
     }
 
     /**
