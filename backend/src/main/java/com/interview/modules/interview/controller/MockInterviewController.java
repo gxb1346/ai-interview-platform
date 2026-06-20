@@ -83,10 +83,12 @@ public class MockInterviewController {
         response.put("currentStage", session.getCurrentStage());
         response.put("status", session.getStatus());
 
-        // 文字面试模式下，后台异步生成语音，使页面可播放
-        String audioBase64 = audioService.textToSpeechBase64(replyText);
-        if (audioBase64 != null) {
-            response.put("audio", audioBase64);
+        // 只有语音模式才需要生成语音（文字模式不需要 TTS，避免产生额外费用）
+        if ("voice".equals(session.getMode())) {
+            String audioBase64 = audioService.textToSpeechBase64(replyText);
+            if (audioBase64 != null) {
+                response.put("audio", audioBase64);
+            }
         }
 
         return ResponseEntity.ok(response);

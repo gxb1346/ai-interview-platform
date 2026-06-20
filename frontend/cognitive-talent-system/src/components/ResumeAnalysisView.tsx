@@ -9,7 +9,7 @@
 
 import React, { useState, useRef } from "react";
 import {
-  Upload, FileText, Sparkles, AlertCircle, BarChart3,
+  Upload, FileText, Sparkles, AlertCircle,
   CheckCircle2, ChevronRight, Play, Check, File, X, Loader2, Layers
 } from "lucide-react";
 import { Candidate, CandidateStatus } from "../types";
@@ -405,9 +405,9 @@ export default function ResumeAnalysisView({
       </div>
 
       {!analyzedCandidate && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* 左侧上传区 */}
-          <div className="lg:col-span-7 bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div className="grid grid-cols-1 gap-6">
+          {/* 上传区 */}
+          <div className="bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
             {/* 目标岗位输入 */}
             <div className="space-y-2">
               <label className="text-sm font-semibold text-slate-700 font-sans block">
@@ -584,68 +584,6 @@ export default function ResumeAnalysisView({
                 </div>
               )}
             </div>
-          </div>
-
-          {/* 右侧功能介绍 */}
-          <div className="lg:col-span-5 bg-gradient-to-b from-primary/5 to-transparent p-8 rounded-2xl border border-primary/10 flex flex-col justify-between space-y-6">
-            <div className="space-y-4">
-              <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
-                <BarChart3 className="w-6 h-6 text-primary" />
-              </div>
-              <h2 className="text-lg font-bold font-sans text-slate-800">
-                全自动简历分析管线
-              </h2>
-              <p className="text-xs text-slate-500 leading-relaxed font-sans">
-                系统利用 <strong>Apache Tika</strong> 解析 PDF/DOCX/TXT，
-                通过 <strong>Spring AI + 通义千问</strong> 大模型进行深度评估。
-                原始文件归档至 <strong>MinIO</strong>，分析结果持久化至 <strong>PostgreSQL</strong>。
-              </p>
-
-              <div className="space-y-3 pt-2">
-                <div className="flex items-start gap-2.5">
-                  <div className="w-1.5 h-1.5 bg-primary rounded-full mt-1.5" />
-                  <p className="text-xs text-slate-600 font-sans">
-                    <strong>Step 1</strong> → Tika 文档解析引擎提取纯文本
-                  </p>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <div className="w-1.5 h-1.5 bg-primary rounded-full mt-1.5" />
-                  <p className="text-xs text-slate-600 font-sans">
-                    <strong>Step 2</strong> → AI 五维能力建模评分
-                  </p>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <div className="w-1.5 h-1.5 bg-primary rounded-full mt-1.5" />
-                  <p className="text-xs text-slate-600 font-sans">
-                    <strong>Step 3</strong> → 优劣势分析 + 闪光点提取
-                  </p>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <div className="w-1.5 h-1.5 bg-primary rounded-full mt-1.5" />
-                  <p className="text-xs text-slate-600 font-sans">
-                    <strong>Step 4</strong> → 结构化存储至 PostgreSQL + MinIO
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* 进度指示器 */}
-            {loading && (
-              <div className="bg-white/80 backdrop-blur-xl p-5 rounded-xl border border-slate-200 shadow-md space-y-3.5">
-                <div className="flex items-center gap-3">
-                  <div className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                  <span className="text-xs font-semibold text-slate-700 font-sans">
-                    {progressSteps[progressStep - 1] || "正在准备..."}
-                  </span>
-                </div>
-                <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className="bg-primary h-full rounded-full transition-all duration-1000"
-                    style={{ width: `${(progressStep / 4) * 100}%` }}
-                  />
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}

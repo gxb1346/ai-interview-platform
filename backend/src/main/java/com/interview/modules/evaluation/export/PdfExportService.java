@@ -31,7 +31,14 @@ public class PdfExportService {
     @Value("${app.pdf.export-path:./reports}")
     private String exportPath;
 
-    private static final String FONT_PATH = "META-INF/resources/webjars/font-asian/8.0.5/NotoSansSC-Regular.otf";
+    private static final String[] FONT_ASIAN_PATHS = {
+        // iText font-asian 可能的路径（8.0.5 移除了 NotoSansSC，改用 STSong-Light）
+        "META-INF/resources/webjars/font-asian/8.0.5/STSong-Light.ttf",
+        "com/itextpdf/font/asian/STSong-Light.ttf",
+        "com/itextpdf/font/asian/NotoSansSC-Regular.otf",
+        "META-INF/resources/webjars/font-asian/8.0.5/NotoSansSC-Regular.otf"
+    };
+
     private static final String[] FONT_FALLBACK_PATHS = {
         // Windows 10/11 中文字体（TTC集合字体，需指定索引0）
         "C:/Windows/Fonts/msyh.ttc",
@@ -52,29 +59,80 @@ public class PdfExportService {
     };
 
     private PdfFont loadChineseFont() {
-        // 1. 尝试从 font-asian 库加载
-        try {
-            return PdfFontFactory.createFont(FONT_PATH, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
-        } catch (Exception e) {
-            System.err.println("font-asian 字体加载失败: " + e.getMessage());
+        // 1. 依次尝试 font-asian 库中的路径
+        for (String path : FONT_ASIAN_PATHS) {
+            try {
+                PdfFont font = PdfFontFactory.createFont(path, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                System.out.println("PDF 字体加载成功: " + path);
+                return font;
+            } catch (Exception e) {
+                System.err.println("font-asian 路径加载失败: " + path + " - " + e.getMessage());
+            }
         }
-        // 2. 尝试使用系统字体（TTC集合字体指定索引0，TTF直接加载）
+        // 2. 尝试使用系统字体
+        PdfFont sysFont = loadSystemFont();
+        if (sysFont != null) return sysFont;
+
+        // 3. 最后兜底：扫描 Windows Fonts 目录
+        PdfFont scannedFont = scanWindowsFontsDir();
+        if (scannedFont != null) return scannedFont;
+
+        System.err.println("所有字体加载失败: 未找到可用的中文字体");
+        return null;
+    }
+
+    /** 尝试加载系统字体列表中的字体 */
+    private PdfFont loadSystemFont() {
         for (String path : FONT_FALLBACK_PATHS) {
             try {
                 if (new File(path).exists()) {
                     String fontName = path.toLowerCase();
-                    if (fontName.endsWith(".ttc")) {
-                        // TTC集合字体：需要指定索引，msyh.ttc的索引0为微软雅黑
-                        return PdfFontFactory.createFont(path + ",0", PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
-                    } else {
-                        return PdfFontFactory.createFont(path, PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
-                    }
+                    String loadPath = fontName.endsWith(".ttc") ? path + ",0" : path;
+                    PdfFont font = PdfFontFactory.createFont(loadPath, PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
+                    System.out.println("PDF 系统字体加载成功: " + path);
+                    return font;
                 }
             } catch (Exception e2) {
                 System.err.println("系统字体加载失败: " + path + " - " + e2.getMessage());
             }
         }
-        System.err.println("所有系统字体加载失败: 未找到可用的中文字体");
+        return null;
+    }
+
+    /** 兜底：扫描 Windows Fonts 目录，查找第一个可用的 TTF/TTC 字体 */
+    private PdfFont scanWindowsFontsDir() {
+        String[] fontDirs = {
+            "C:/Windows/Fonts",
+            System.getenv("LOCALAPPDATA") + "/Microsoft/Windows/Fonts",
+            System.getProperty("user.home") + "/AppData/Local/Microsoft/Windows/Fonts"
+        };
+        for (String dir : fontDirs) {
+            if (dir == null || dir.startsWith("null")) continue;
+            File fontDir = new File(dir);
+            if (!fontDir.isDirectory()) continue;
+            File[] files = fontDir.listFiles((d, name) ->
+                name.toLowerCase().endsWith(".ttf") || name.toLowerCase().endsWith(".ttc"));
+            if (files == null) continue;
+            for (File f : files) {
+                try {
+                    String path = f.getAbsolutePath();
+                    String lower = path.toLowerCase();
+                    if (!lower.contains("chinese") && !lower.contains("cjk")
+                        && !lower.contains("msyh") && !lower.contains("simsun")
+                        && !lower.contains("simhei") && !lower.contains("yahei")
+                        && !lower.contains("simkai") && !lower.contains("simfang")
+                        && !lower.contains("song") && !lower.contains("hei")
+                        && !lower.contains("kai") && !lower.contains("fang")
+                        && !lower.contains("ming")) {
+                        continue; // 只尝试中文字体文件
+                    }
+                    String loadPath = lower.endsWith(".ttc") ? path + ",0" : path;
+                    PdfFont font = PdfFontFactory.createFont(loadPath, PdfFontFactory.EmbeddingStrategy.PREFER_NOT_EMBEDDED);
+                    System.out.println("PDF 扫描字体加载成功: " + path);
+                    return font;
+                } catch (Exception ignored) {}
+            }
+        }
         return null;
     }
     

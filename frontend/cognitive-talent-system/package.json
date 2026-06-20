@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "dayjs": "^1.11.21",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "lucide-react": "^0.468.0",

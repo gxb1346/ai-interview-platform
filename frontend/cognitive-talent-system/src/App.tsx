@@ -115,7 +115,9 @@ export default function App() {
     () => loadFromStorage("recruit_scorecards", PRESEEDED_SCORECARDS)
   );
   const [preSelectedCandidate, setPreSelectedCandidate] = useState<Candidate | null>(null);
-  const [interviewSessions, setInterviewSessions] = useState<InterviewSession[]>([]);
+  const [interviewSessions, setInterviewSessions] = useState<InterviewSession[]>(
+    () => loadFromStorage("recruit_sessions", [] as InterviewSession[])
+  );
   const [resumeSessionId, setResumeSessionId] = useState<string | null>(null);
 
   // Search input matching local list
@@ -124,6 +126,7 @@ export default function App() {
   // 数据变更时自动持久化到 localStorage
   useEffect(() => { saveToStorage("recruit_candidates", candidates); }, [candidates]);
   useEffect(() => { saveToStorage("recruit_interviews", interviews); }, [interviews]);
+  useEffect(() => { saveToStorage("recruit_sessions", interviewSessions); }, [interviewSessions]);
   useEffect(() => { saveToStorage("recruit_scorecards", scoreCards); }, [scoreCards]);
 
   // Add Candidate to list
@@ -139,6 +142,20 @@ export default function App() {
   // Remove Interview Schedule slot
   const handleRemoveInterview = (id: string) => {
     setInterviews((prev) => prev.filter((i) => i.id !== id));
+  };
+
+  // 重新安排面试时间
+  const handleRescheduleInterview = (id: string, newDate: string) => {
+    setInterviews((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, scheduledAt: newDate } : i))
+    );
+  };
+
+  // 更新面试状态
+  const handleUpdateInterviewStatus = (id: string, status: "pending" | "completed" | "cancelled") => {
+    setInterviews((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, status } : i))
+    );
   };
 
   // Save score evaluation scorecard
@@ -483,7 +500,13 @@ export default function App() {
             )}
 
             {currentView === "SCHEDULE" && (
-              <ScheduleView interviews={interviews} />
+              <ScheduleView
+                interviews={interviews}
+                onAddInterview={handleAddInterview}
+                onRemoveInterview={handleRemoveInterview}
+                onReschedule={handleRescheduleInterview}
+                onStatusChange={handleUpdateInterviewStatus}
+              />
             )}
 
             {currentView === "KNOWLEDGE_BASE" && (
