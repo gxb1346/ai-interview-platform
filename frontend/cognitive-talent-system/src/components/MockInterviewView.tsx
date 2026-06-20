@@ -497,8 +497,8 @@ export default function MockInterviewView({
   /** 播放 TTS 语音回复 */
   const playTTSAudio = useCallback((audioBase64: string) => {
     try {
-      // 输出格式为 WAV（由后端 AudioService 的 CosyVoice 参数决定）
-      const audioSrc = `data:audio/wav;base64,${audioBase64}`;
+      // Edge-TTS 输出格式为 MP3（由本地 Edge-TTS 免费服务决定）
+      const audioSrc = `data:audio/mpeg;base64,${audioBase64}`;
       // 复用 audio 元素，避免重复创建
       if (!audioRef.current) {
         audioRef.current = new Audio();
@@ -550,6 +550,8 @@ export default function MockInterviewView({
           // 流式输出结束后，将完整消息加入 messages 数组
           setMessages(prev => [...prev, { id: replyId, sender: "interviewer" as const, text: replyText, timestamp }]);
           setStreamingReply("");
+          // **流式结束后才解锁输入框**（防止面试官吐字时用户打字）
+          setThinking(false);
           // 流式结束后启动回答超时计时器（180s）
           startTimeoutTimer();
         }
@@ -577,12 +579,19 @@ export default function MockInterviewView({
         handleEvaluate(sessionId);
       }
     } catch {
+      // 异常时也需要解锁输入框
+      setThinking(false);
+      if (streamingTimerRef.current !== null) {
+        clearInterval(streamingTimerRef.current);
+        streamingTimerRef.current = null;
+        setStreamingReply("");
+      }
       setMessages(prev => [...prev, {
         id: "inter_fb" + Date.now(), sender: "interviewer",
         text: "感谢你的回答，请继续分享你的见解。",
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       }]);
-    } finally { setThinking(false); }
+    }
   };
 
   const handleEvaluate = async (sid: string) => {
@@ -697,6 +706,8 @@ export default function MockInterviewView({
             id: replyId, sender: "interviewer" as const, text: replyText, timestamp
           }]);
           setStreamingReply("");
+          // **流式结束后才解锁输入框**
+          setThinking(false);
           // 超时回复后启动新的超时计时器
           startTimeoutTimer();
         }
@@ -711,8 +722,10 @@ export default function MockInterviewView({
         handleEvaluate(sessionId);
       }
     } catch {
+      // 异常时也需要解锁输入框
+      setThinking(false);
       // 超时提交失败时静默处理
-    } finally { setThinking(false); }
+    }
   }, [sessionId, thinking, timerInterval]);
 
   const startTimeoutTimer = useCallback(() => {

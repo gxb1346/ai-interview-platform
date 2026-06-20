@@ -3,6 +3,8 @@ package com.interview.modules.interview.controller;
 import com.interview.modules.interview.model.InterviewSession;
 import com.interview.modules.interview.service.AudioService;
 import com.interview.modules.interview.service.MockInterviewService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,6 +19,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/mock-interview")
 public class MockInterviewController {
+
+    private static final Logger log = LoggerFactory.getLogger(MockInterviewController.class);
 
     private final MockInterviewService interviewService;
     private final AudioService audioService;
@@ -83,12 +87,14 @@ public class MockInterviewController {
         response.put("currentStage", session.getCurrentStage());
         response.put("status", session.getStatus());
 
-        // 只有语音模式才需要生成语音（文字模式不需要 TTS，避免产生额外费用）
-        if ("voice".equals(session.getMode())) {
+        // 使用免费本地 Edge-TTS 生成语音，无需区分模式
+        try {
             String audioBase64 = audioService.textToSpeechBase64(replyText);
             if (audioBase64 != null) {
                 response.put("audio", audioBase64);
             }
+        } catch (Exception e) {
+            log.warn("TTS 生成失败，跳过语音: {}", e.getMessage());
         }
 
         return ResponseEntity.ok(response);

@@ -32,7 +32,33 @@ services:
     volumes:
       - minio_data:/data
 
+  # 本地 faster-whisper ASR 服务（替代付费的 DashScope ASR）
+  whisper:
+    build:
+      context: ./backend/src/main/python
+      dockerfile: Dockerfile
+    ports:
+      - "9090:9090"
+    volumes:
+      - whisper_model_data:/root/.cache/huggingface
+    environment:
+      - HF_ENDPOINT=https://hf-mirror.com
+      - HF_HUB_DISABLE_SSL_VERIFY=1
+    restart: unless-stopped
+
+  # 本地 Edge-TTS 语音合成服务（免费替代 DashScope CosyVoice TTS）
+  edge-tts:
+    build:
+      context: ./backend/src/main/python
+      dockerfile: Dockerfile.tts
+    ports:
+      - "9091:9091"
+    environment:
+      - EDGE_TTS_VOICE=zh-CN-YunxiNeural
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  whisper_model_data:

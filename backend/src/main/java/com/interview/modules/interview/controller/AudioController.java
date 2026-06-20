@@ -1,10 +1,19 @@
 package com.interview.modules.interview.controller;
 
+import com.alibaba.dashscope.aigc.multimodalconversation.MultiModalConversation;
+import com.alibaba.dashscope.aigc.multimodalconversation.MultiModalConversationParam;
+import com.alibaba.dashscope.aigc.multimodalconversation.MultiModalConversationResult;
 import com.alibaba.dashscope.audio.asr.recognition.Recognition;
 import com.alibaba.dashscope.audio.asr.recognition.RecognitionParam;
 import com.alibaba.dashscope.audio.asr.recognition.RecognitionResult;
+import com.alibaba.dashscope.common.MultiModalMessage;
 import com.alibaba.dashscope.common.ResultCallback;
+import com.alibaba.dashscope.common.Role;
 import com.alibaba.dashscope.utils.Constants;
+import com.alibaba.dashscope.utils.JsonUtils;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,8 +29,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 import static com.interview.modules.interview.controller.TechHotwords.HOTWORDS;
@@ -62,9 +70,20 @@ public class AudioController {
         return ResponseEntity.ok(Map.of(
                 "apiKeyConfigured", apiKey != null && !apiKey.isEmpty(),
                 "apiKeyPrefix", apiKey != null && apiKey.length() > 8 ? apiKey.substring(0, 8) + "..." : "(空)",
-                "model", aiModel,
+                "asrModel", "qwen3-asr-flash",
                 "wsEndpoint", Constants.baseWebsocketApiUrl,
-                "status", "ASR 服务已就绪（使用 DashScope Fun-ASR/Paraformer）"
+                "status", "ASR 服务已就绪"
+        ));
+    }
+
+    /**
+     * 获取当前 ASR 提供商信息（前端专用）
+     */
+    @GetMapping("/provider")
+    public ResponseEntity<Map<String, Object>> getProvider() {
+        return ResponseEntity.ok(Map.of(
+                "provider", "dashscope",
+                "name", "DashScope qwen3-asr-flash"
         ));
     }
 
@@ -92,7 +111,18 @@ public class AudioController {
             byte[] audioBytes = audioFile.getBytes();
             log.info("  实际读取字节数: {}", audioBytes.length);
 
-            String text = callDashScopeASR(audioBytes, audioFile.getContentType());
+            if (apiKey == null || apiKey.isEmpty()) {
+                log.warn("AI_API_KEY 未配置，ASR 不可用");
+                return ResponseEntity.ok(Map.of(
+                        "text", "",
+                        "elapsed", System.currentTimeMillis() - startTime,
+                        "warning", "ASR 不可用: 请配置 API_KEY"
+                ));
+            }
+
+            log.info("使用 DashScope qwen3-asr-flash ASR...");
+            String text = callQwenAsrFlash(audioBytes, audioFile.getContentType());
+
             long elapsed = System.currentTimeMillis() - startTime;
             log.info("ASR 总耗时: {} ms", elapsed);
 
@@ -271,73 +301,109 @@ public class AudioController {
     }
 
     /**
-     * 使用 DashScope Recognition SDK 将音频转为文本（非流式文件识别）
-     * 文档: https://help.aliyun.com/zh/model-studio/fun-asr-realtime-java-sdk
+     * 使用 DashScope qwen3-asr-flash 将音频转为文字（非流式）
+     * 通过 MultiModalConversation API 传入 Base64 编码的音频
      */
-    private String callDashScopeASR(byte[] audioBytes, String contentType) {
-        if (apiKey == null || apiKey.isEmpty()) {
-            log.warn("AI_API_KEY 未配置，ASR 跳过");
-            return null;
-        }
+    private String callQwenAsrFlash(byte[] audioBytes, String contentType) {
+        long startTime = System.currentTimeMillis();
+        log.info("qwen3-asr-flash ASR 开始...");
 
-        File tempFile = null;
         try {
-            // 确定音频格式和扩展名
-            String format = detectFormat(contentType);
-            String ext = formatToExtension(format);
-            log.info("DashScope ASR 参数: format={}, ext={}", format, ext);
+            // 将音频转为 Base64 Data URI
+            String mimeType = detectMimeType(contentType);
+            String base64 = Base64.getEncoder().encodeToString(audioBytes);
+            String dataUri = "data:" + mimeType + ";base64," + base64;
+            log.info("音频已编码: dataUri length={}, mimeType={}", dataUri.length(), mimeType);
 
-            // 将上传的字节写入临时文件
-            tempFile = new File(System.getProperty("java.io.tmpdir"),
-                    "asr_" + UUID.randomUUID() + "." + ext);
-            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-                fos.write(audioBytes);
-            }
-            log.info("临时音频文件: {} ({} bytes)", tempFile.getAbsolutePath(), tempFile.length());
+            // 构建 MultiModalConversation 请求
+            MultiModalConversation conv = new MultiModalConversation();
 
-            // 构建 Recognition 参数
-            RecognitionParam param = RecognitionParam.builder()
-                    .model("paraformer-realtime-v2")
-                    .apiKey(apiKey)
-                    .format(format)
-                    .sampleRate(16000)
-                    .parameter("hotwords", HOTWORDS)
+            MultiModalMessage userMessage = MultiModalMessage.builder()
+                    .role(Role.USER.getValue())
+                    .content(Collections.singletonList(
+                            Collections.singletonMap("audio", dataUri)))
                     .build();
-            log.info("RecognitionParam 构建完成: model={}, format={}, sampleRate={}",
-                    "paraformer-realtime-v2", format, 16000);
 
-            // 创建 Recognition 实例并调用文件识别
-            Recognition recognizer = new Recognition();
-            log.info("开始调用 recognizer.call(param, file)...");
+            Map<String, Object> asrOptions = new HashMap<>();
+            asrOptions.put("enable_itn", false);
 
-            // call(param, File) 是阻塞式调用，返回识别结果字符串
-            String result = recognizer.call(param, tempFile);
-            log.info("recognizer.call() 返回结果: {}", result != null ? "\"" + result + "\"" : "null");
+            MultiModalConversationParam param = MultiModalConversationParam.builder()
+                    .apiKey(apiKey)
+                    .model("qwen3-asr-flash")
+                    .message(userMessage)
+                    .parameter("asr_options", asrOptions)
+                    .build();
 
-            // 关闭 WebSocket 连接
-            try {
-                if (recognizer.getDuplexApi() != null) {
-                    recognizer.getDuplexApi().close(1000, "bye");
-                    log.info("WebSocket 连接已关闭");
-                }
-            } catch (Exception closeEx) {
-                log.warn("关闭 WebSocket 时出现异常 (可忽略): {}", closeEx.getMessage());
-            }
+            log.info("调用 MultiModalConversation API...");
+            MultiModalConversationResult result = conv.call(param);
 
-            return result;
+            // 从结果中提取识别文本
+            String text = extractAsrText(result);
+            long elapsed = System.currentTimeMillis() - startTime;
+            log.info("qwen3-asr-flash 识别完成: text=\"{}\", 耗时={}ms",
+                    text != null ? text.substring(0, Math.min(50, text.length())) : "null", elapsed);
+            return text;
+
         } catch (Exception e) {
-            log.error("DashScope ASR SDK 调用异常: {}", e.getMessage(), e);
+            log.error("qwen3-asr-flash ASR 失败: {}", e.getMessage(), e);
             return null;
-        } finally {
-            // 清理临时文件
-            if (tempFile != null && tempFile.exists()) {
-                if (tempFile.delete()) {
-                    log.info("临时文件已删除: {}", tempFile.getName());
-                } else {
-                    log.warn("临时文件删除失败: {}", tempFile.getAbsolutePath());
+        }
+    }
+
+    /**
+     * 从 MultiModalConversationResult 中提取 ASR 识别文本
+     * 响应格式: { output: { choices: [{ message: { content: [{ text: "..." }] } }] } }
+     */
+    private String extractAsrText(MultiModalConversationResult result) {
+        try {
+            String jsonStr = JsonUtils.toJson(result);
+            JsonObject root = com.google.gson.JsonParser.parseString(jsonStr).getAsJsonObject();
+
+            if (root.has("output")) {
+                JsonObject output = root.getAsJsonObject("output");
+                if (output.has("choices")) {
+                    JsonArray choices = output.getAsJsonArray("choices");
+                    if (choices != null && choices.size() > 0) {
+                        JsonObject choice = choices.get(0).getAsJsonObject();
+                        if (choice.has("message")) {
+                            JsonObject message = choice.getAsJsonObject("message");
+                            if (message.has("content")) {
+                                JsonArray content = message.getAsJsonArray("content");
+                                if (content != null && content.size() > 0) {
+                                    JsonObject firstContent = content.get(0).getAsJsonObject();
+                                    if (firstContent.has("text")) {
+                                        return firstContent.get("text").getAsString();
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
+
+            // 如果以上路径解析失败，记录完整响应用于调试
+            log.warn("无法从 ASR 结果中提取文本，完整响应: {}", jsonStr);
+            return null;
+        } catch (Exception e) {
+            log.warn("解析 ASR 结果异常: {}", e.getMessage());
+            return null;
         }
+    }
+
+    /**
+     * 根据 Content-Type 获取对应的 MIME 类型（用于 Base64 Data URI）
+     */
+    private String detectMimeType(String contentType) {
+        if (contentType == null) return "audio/wav";
+        String ct = contentType.toLowerCase();
+        if (ct.contains("webm")) return "audio/webm";
+        if (ct.contains("opus")) return "audio/opus";
+        if (ct.contains("wav")) return "audio/wav";
+        if (ct.contains("mp3")) return "audio/mpeg";
+        if (ct.contains("mp4") || ct.contains("aac")) return "audio/aac";
+        if (ct.contains("amr")) return "audio/amr";
+        if (ct.contains("ogg")) return "audio/ogg";
+        return "audio/wav";
     }
 
     /**

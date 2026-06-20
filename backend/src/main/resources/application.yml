@@ -81,3 +81,23 @@ app:
     access-key: ${STORAGE_ACCESS_KEY:minioadmin}
     secret-key: ${STORAGE_SECRET_KEY:minioadmin}
     bucket: interview-guide
+
+# 本地 Edge-TTS 语音合成服务（免费替代付费的 DashScope CosyVoice TTS）
+# 无需启动 Docker 容器，也可通过 Python 直接运行:
+#   cd backend/src/main/python
+#   pip install -r edge-tts-requirements.txt
+#   python edge-tts-server.py --port 9091
+edge-tts:
+  base-url: ${EDGE_TTS_BASE_URL:http://localhost:9091}
+  voice: ${EDGE_TTS_VOICE:zh-CN-YunxiNeural}
+
+# 本地 faster-whisper ASR 配置（可选，替代付费的 DashScope ASR）
+# 启用后需先启动 Python 服务：
+#   cd backend/src/main/python
+#   pip install -r requirements.txt
+#   python whisper_server.py --model base --device cpu --port 9090
+whisper:
+  enabled: ${WHISPER_ENABLED:false}
+  base-url: http://localhost:9090
+  model: base
+  device: cpu

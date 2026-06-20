@@ -1,0 +1,23 @@
+# Edge-TTS 本地语音合成服务
+# 基于 edge-tts 免费文字转语音，替代付费 DashScope CosyVoice TTS
+FROM python:3.11-slim
+
+# 设置国内镜像源（避免网络问题）
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
+
+# 安装依赖（无需编译工具，edge-tts 使用纯 Python wheels）
+WORKDIR /app
+COPY edge-tts-requirements.txt .
+RUN pip install --no-cache-dir --default-timeout=120 -r edge-tts-requirements.txt
+
+# 复制服务代码
+COPY edge-tts-server.py .
+
+# 默认音色可通过环境变量覆盖
+ENV EDGE_TTS_VOICE=zh-CN-YunxiNeural
+
+EXPOSE 9091
+
+# 启动服务
+CMD python edge-tts-server.py --port 9091 --voice ${EDGE_TTS_VOICE}
