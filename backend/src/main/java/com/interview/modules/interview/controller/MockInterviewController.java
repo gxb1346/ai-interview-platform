@@ -1,13 +1,18 @@
 package com.interview.modules.interview.controller;
 
+import com.interview.common.exception.BusinessException;
 import com.interview.modules.interview.model.InterviewSession;
+import com.interview.modules.interview.model.InterviewSessionRecord;
 import com.interview.modules.interview.service.AudioService;
 import com.interview.modules.interview.service.MockInterviewService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -139,7 +144,7 @@ public class MockInterviewController {
             response.put("mode", session.getMode());
             response.put("messages", session.getMessages());
             return ResponseEntity.ok(response);
-        } catch (RuntimeException e) {
+        } catch (BusinessException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
@@ -167,7 +172,7 @@ public class MockInterviewController {
                     "sessionId", session.getSessionId(),
                     "status", session.getStatus()
             ));
-        } catch (RuntimeException e) {
+        } catch (BusinessException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
@@ -183,7 +188,7 @@ public class MockInterviewController {
                     "sessionId", session.getSessionId(),
                     "status", session.getStatus()
             ));
-        } catch (RuntimeException e) {
+        } catch (BusinessException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
@@ -216,6 +221,43 @@ public class MockInterviewController {
         }
         int deleted = interviewService.batchDeleteSessions(sessionIds);
         return ResponseEntity.ok(Map.of("deleted", deleted));
+    }
+
+    /**
+     * 搜索面试历史（分页 + 多条件筛选）
+     */
+    @GetMapping("/sessions/search")
+    public ResponseEntity<Map<String, Object>> searchSessions(
+            @RequestParam(required = false) String candidateId,
+            @RequestParam(required = false) String direction,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String startTime,
+            @RequestParam(required = false) String endTime,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        LocalDateTime start = startTime != null ? LocalDateTime.parse(startTime, formatter) : null;
+        LocalDateTime end = endTime != null ? LocalDateTime.parse(endTime, formatter) : null;
+
+        Page<InterviewSessionRecord> result = interviewService.searchSessions(
+                candidateId, direction, status, start, end, page, size);
+
+        return ResponseEntity.ok(Map.of(
+                "content", result.getContent(),
+                "totalElements", result.getTotalElements(),
+                "totalPages", result.getTotalPages(),
+                "currentPage", result.getNumber(),
+                "size", result.getSize()
+        ));
+    }
+
+    /**
+     * 获取面试仪表盘统计数据
+     */
+    @GetMapping("/dashboard/stats")
+    public ResponseEntity<Map<String, Object>> getDashboardStats() {
+        return ResponseEntity.ok(interviewService.getDashboardStats());
     }
 
     /**

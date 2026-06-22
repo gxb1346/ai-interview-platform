@@ -1,5 +1,7 @@
 package com.interview.modules.knowledge.service;
 
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import com.interview.infrastructure.stream.model.TaskType;
 import com.interview.infrastructure.stream.producer.TaskProducer;
 import com.interview.modules.knowledge.model.KnowledgeDocument;
@@ -61,7 +63,7 @@ public class DocumentProcessService {
         try {
             contentHash = computeMD5(file.getBytes());
         } catch (Exception e) {
-            throw new RuntimeException("计算文件 MD5 失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.DOCUMENT_PARSE_FAILED, "计算文件 MD5 失败: " + e.getMessage());
         }
 
         // 检查是否已上传过相同内容的文件
@@ -86,7 +88,7 @@ public class DocumentProcessService {
         // 1. Tika 解析文档为纯文本（同步完成，速度较快）
         String rawText = tikaService.extractText(file);
         if (rawText == null || rawText.isBlank()) {
-            throw new RuntimeException("文档内容为空（文件可能为扫描件图片，无法提取文字）");
+            throw new BusinessException(ErrorCode.DOCUMENT_PARSE_FAILED, "文档内容为空（文件可能为扫描件图片，无法提取文字）");
         }
 
         // 2. 通过 Redis Stream 异步执行向量化（分块 → Embedding → 写入 pgvector）
@@ -107,7 +109,7 @@ public class DocumentProcessService {
     @Transactional
     public void deleteDocument(Long docId) {
         KnowledgeDocument doc = documentRepository.findById(docId)
-                .orElseThrow(() -> new RuntimeException("文档不存在: id=" + docId));
+                .orElseThrow(() -> new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND, "文档不存在: id=" + docId));
 
         // 通过 metadata 中的 documentId 过滤删除 pgvector 中的向量数据
         try {
@@ -149,7 +151,7 @@ public class DocumentProcessService {
             byte[] digest = md.digest(data);
             return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("MD5 算法不可用", e);
+            throw new BusinessException(ErrorCode.DOCUMENT_PARSE_FAILED, "MD5 算法不可用");
         }
     }
 

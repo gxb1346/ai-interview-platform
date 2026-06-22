@@ -1,5 +1,7 @@
 package com.interview.infrastructure.monitor;
 
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import com.interview.infrastructure.ratelimit.LlmRateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,7 +36,7 @@ public class ChatResponseHelper {
     public String call(String callPoint, ChatClient client, String prompt) {
         if (!rateLimiter.tryAcquire()) {
             monitor.recordRateLimit(callPoint);
-            throw new RuntimeException("LLM 调用限流，请稍后重试");
+            throw new BusinessException(ErrorCode.AI_RATE_LIMITED);
         }
 
         long startNanos = System.nanoTime();

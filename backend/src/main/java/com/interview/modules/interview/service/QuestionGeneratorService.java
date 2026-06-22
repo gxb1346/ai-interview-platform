@@ -5,6 +5,7 @@ import com.interview.modules.interview.model.InterviewLevel;
 import com.interview.modules.interview.repository.InterviewSessionRepository;
 import com.interview.modules.interview.skill.InterviewSkill;
 import com.interview.modules.interview.skill.SkillRegistry;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
@@ -16,6 +17,7 @@ import java.util.concurrent.Executors;
  * 并行双路出题引擎
  * 60% 简历深挖题 + 40% 方向基础题，使用虚拟线程并行生成后合并
  */
+@Slf4j
 @Service
 public class QuestionGeneratorService {
 
@@ -118,7 +120,7 @@ public class QuestionGeneratorService {
 
             return parseResumeQuestions(response, directionName, level, stage);
         } catch (Exception e) {
-            System.err.println("简历深挖出题失败: " + e.getMessage());
+            log.warn("简历深挖出题失败: {}", e.getMessage());
             return generateResumeFallbackQuestions(count, level, stage);
         }
     }
@@ -183,7 +185,7 @@ public class QuestionGeneratorService {
                 questions.add(q);
             }
         } catch (Exception e) {
-            System.err.println("解析简历深挖题 JSON 失败: " + e.getMessage());
+            log.warn("解析简历深挖题 JSON 失败: {}", e.getMessage());
             return generateResumeFallbackQuestions(questions.size() > 0 ? questions.size() : 3, level, stage);
         }
         return questions;

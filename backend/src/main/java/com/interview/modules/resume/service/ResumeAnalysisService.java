@@ -1,6 +1,8 @@
 package com.interview.modules.resume.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import com.interview.infrastructure.monitor.ChatResponseHelper;
 import com.interview.infrastructure.monitor.LlmCallMonitor;
 import com.interview.modules.resume.model.AnalysisResult;
@@ -43,7 +45,7 @@ public class ResumeAnalysisService {
 
             return objectMapper.readValue(json, AnalysisResult.class);
         } catch (Exception e) {
-            throw new RuntimeException("AI 简历分析失败: " + e.getMessage(), e);
+            throw new BusinessException(ErrorCode.AI_SERVICE_ERROR, "AI 简历分析失败: " + e.getMessage());
         }
     }
 
@@ -97,7 +99,7 @@ public class ResumeAnalysisService {
      */
     private String cleanJsonResponse(String response) {
         if (response == null) {
-            throw new RuntimeException("AI 返回为空");
+            throw new BusinessException(ErrorCode.AI_EMPTY_RESPONSE, "AI 返回为空");
         }
         String cleaned = response.trim();
         if (cleaned.startsWith("```")) {

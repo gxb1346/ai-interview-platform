@@ -2,6 +2,7 @@ package com.interview.modules.interview.service;
 
 import com.interview.modules.interview.skill.InterviewSkill;
 import com.interview.modules.interview.skill.SkillRegistry;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
@@ -11,6 +12,7 @@ import java.util.*;
  * 简历方向推荐服务（Semantic Matching）
  * 上传简历后，LLM 自动推荐最匹配的面试方向
  */
+@Slf4j
 @Service
 public class DirectionRecommendService {
 
@@ -68,7 +70,7 @@ public class DirectionRecommendService {
 
             return parseResponse(response);
         } catch (Exception e) {
-            System.err.println("方向推荐失败: " + e.getMessage());
+            log.warn("方向推荐失败: {}", e.getMessage());
             return getDefaultRecommendations();
         }
     }
@@ -95,7 +97,7 @@ public class DirectionRecommendService {
                 results.add(match);
             }
         } catch (Exception e) {
-            System.err.println("推荐方向 JSON 解析失败: " + e.getMessage());
+            log.warn("推荐方向 JSON 解析失败: {}", e.getMessage());
             return getDefaultRecommendations();
         }
 

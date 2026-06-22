@@ -18,12 +18,15 @@ public class JwtTokenProvider {
 
     private final SecretKey secretKey;
     private final long expirationMs;
+    private final long refreshExpirationMs;
 
     public JwtTokenProvider(
-            @Value("${app.jwt.secret:RecruitAI-JWT-Secret-Key-2026-Must-Be-At-Least-256-Bits-Long!!}") String secret,
-            @Value("${app.jwt.expiration-ms:86400000}") long expirationMs) {
+            @Value("${app.jwt.secret}") String secret,
+            @Value("${app.jwt.expiration-ms:86400000}") long expirationMs,
+            @Value("${app.jwt.refresh-expiration-ms:604800000}") long refreshExpirationMs) {
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expirationMs = expirationMs;
+        this.refreshExpirationMs = refreshExpirationMs;
     }
 
     /**
@@ -77,6 +80,38 @@ public class JwtTokenProvider {
         } catch (JwtException | IllegalArgumentException e) {
             return false;
         }
+    }
+
+    /**
+     * 生成刷新令牌（有效期更长，7天）
+     */
+    public String generateRefreshToken(Long userId, String username) {
+        Date now = new Date();
+        Date expiry = new Date(now.getTime() + refreshExpirationMs);
+
+        return Jwts.builder()
+                .subject(userId.toString())
+                .claim("username", username)
+                .claim("type", "refresh")
+                .issuedAt(now)
+                .expiration(expiry)
+                .signWith(secretKey)
+                .compact();
+    }
+
+    /**
+     * 使用刷新令牌生成新的访问令牌
+     */
+    public String refreshAccessToken(String refreshToken) {
+        Claims claims = parseClaims(refreshToken);
+        String type = claims.get("type", String.class);
+        if (!"refresh".equals(type)) {
+            throw new JwtException("不是有效的刷新令牌");
+        }
+        Long userId = Long.parseLong(claims.getSubject());
+        String username = claims.get("username", String.class);
+        String role = claims.get("role", String.class);
+        return generateToken(userId, username, role != null ? role : "USER");
     }
 
     private Claims parseClaims(String token) {

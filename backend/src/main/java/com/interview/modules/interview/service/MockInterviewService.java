@@ -1,15 +1,20 @@
 package com.interview.modules.interview.service;
 
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import com.interview.modules.evaluation.engine.UnifiedEvaluationEngine;
 import com.interview.modules.evaluation.model.EvaluationReport;
 import com.interview.modules.interview.model.*;
+import com.interview.modules.interview.repository.InterviewSessionRecordRepository;
 import com.interview.modules.interview.repository.InterviewSessionRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.time.LocalDateTime;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -25,6 +30,7 @@ public class MockInterviewService {
     private final JDParseService jdParseService;
     private final DirectionRecommendService directionRecommendService;
     private final InterviewSessionRepository sessionRepository;
+    private final InterviewSessionRecordRepository interviewRecordRepository;
     private final RealTimeScoreService realTimeScoreService;
     private final UnifiedEvaluationEngine evaluationEngine;
 
@@ -33,6 +39,7 @@ public class MockInterviewService {
                                 JDParseService jdParseService,
                                 DirectionRecommendService directionRecommendService,
                                 InterviewSessionRepository sessionRepository,
+                                InterviewSessionRecordRepository interviewRecordRepository,
                                 RealTimeScoreService realTimeScoreService,
                                 UnifiedEvaluationEngine evaluationEngine) {
         this.questionGenerator = questionGenerator;
@@ -40,6 +47,7 @@ public class MockInterviewService {
         this.jdParseService = jdParseService;
         this.directionRecommendService = directionRecommendService;
         this.sessionRepository = sessionRepository;
+        this.interviewRecordRepository = interviewRecordRepository;
         this.realTimeScoreService = realTimeScoreService;
         this.evaluationEngine = evaluationEngine;
     }
@@ -67,6 +75,7 @@ public class MockInterviewService {
         }
 
         sessionRepository.save(session);
+        sessionRepository.saveToPg(session);
         return session;
     }
 
@@ -75,7 +84,12 @@ public class MockInterviewService {
      */
     public InterviewSession startInterview(String sessionId) {
         InterviewSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND, "面试会话不存在: " + sessionId));
+
+        if (!"PREPARING".equals(session.getStatus())) {
+            throw new BusinessException(ErrorCode.SESSION_CANNOT_START,
+                    "当前状态为 " + session.getStatus() + "，无法启动面试");
+        }
 
         // 确保 Redis 反序列化后的集合不为 null
         if (session.getQuestions() == null) {
@@ -102,7 +116,7 @@ public class MockInterviewService {
         } catch (Exception e) {
             // AI 出题失败时使用内置 fallback 题目
             questions = getFallbackQuestions(session.getDirection(), session.getLevel());
-            System.err.println("AI 出题失败，使用 fallback 题目: " + e.getMessage());
+            log.warn("AI 出题失败，使用 fallback 题目: {}", e.getMessage());
         }
 
         session.setQuestions(questions);
@@ -128,6 +142,7 @@ public class MockInterviewService {
         session.addMessage(welcomeMsg);
 
         sessionRepository.save(session);
+        sessionRepository.saveToPg(session);
         return session;
     }
 
@@ -162,7 +177,12 @@ public class MockInterviewService {
      */
     public InterviewSession processAnswer(String sessionId, String candidateAnswer) {
         InterviewSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND, "面试会话不存在: " + sessionId));
+
+        if (!"IN_PROGRESS".equals(session.getStatus())) {
+            throw new BusinessException(ErrorCode.SESSION_CANNOT_ANSWER,
+                    "当前状态为 " + session.getStatus() + "，无法作答");
+        }
 
         // 确保 Redis 反序列化后的集合不为 null
         if (session.getQuestions() == null) {
@@ -197,32 +217,10 @@ public class MockInterviewService {
             session.setLastScore(previousAnswerMsg.getScore(), previousAnswerMsg.getScoreFeedback());
         }
 
-        // 对本次回答启动异步评分（独立加载 session 避免竞态条件）
+        // 对本次回答启动异步评分
         final String currentQuestion = session.getQuestions().get(session.getCurrentQuestionIndex()).getText();
         final String answerMsgId = answerMsg.getId();
-        new Thread(() -> {
-            try {
-                RealTimeScoreService.ScoreResult result = realTimeScoreService
-                        .scoreAnswer(currentQuestion, candidateAnswer, session.getCurrentStage());
-                if (result != null) {
-                    // 重新加载 session 避免竞态条件
-                    InterviewSession freshSession = sessionRepository.findById(sessionId).orElse(null);
-                    if (freshSession != null) {
-                        freshSession.getMessages().stream()
-                                .filter(m -> answerMsgId.equals(m.getId()))
-                                .findFirst()
-                                .ifPresent(msg -> {
-                                    msg.setScore(result.score);
-                                    msg.setScoreFeedback(result.feedback);
-                                });
-                        sessionRepository.save(freshSession);
-                        log.info("实时评分完成: score={}, feedback={}", result.score, result.feedback);
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("实时评分异步失败: {}", e.getMessage());
-            }
-        }, "tts-score-worker").start();
+        asyncScoreAnswer(sessionId, currentQuestion, candidateAnswer, session.getCurrentStage(), answerMsgId);
 
         // 标记当前题目为已答（仅初次作答时标记，追问不重复标记）
         int qi = session.getCurrentQuestionIndex();
@@ -244,6 +242,7 @@ public class MockInterviewService {
         session.addMessage(replyMsg);
 
         sessionRepository.save(session);
+        sessionRepository.saveToPg(session);
         return session;
     }
 
@@ -373,6 +372,7 @@ public class MockInterviewService {
             session.setStatus("COMPLETED");
             session.setCompletedAt(java.time.LocalDateTime.now());
             sessionRepository.save(session);
+            sessionRepository.saveToPg(session);
             return "所有面试环节已结束。感谢你的参与，系统正在生成评估报告...";
         }
 
@@ -400,6 +400,7 @@ public class MockInterviewService {
         session.addMessage(msg);
 
         sessionRepository.save(session);
+        sessionRepository.saveToPg(session);
         return transitionMsg;
     }
 
@@ -415,7 +416,7 @@ public class MockInterviewService {
                     questionCount
             );
         } catch (Exception e) {
-            System.err.println("[" + stage + "] 出题失败，使用 fallback: " + e.getMessage());
+            log.warn("[{}] 出题失败，使用 fallback: {}", stage, e.getMessage());
             List<InterviewQuestion> fallbacks = new java.util.ArrayList<>();
             String[][] defaultQs = getStageDefaultQuestions(stage);
             for (String[] q : defaultQs) {
@@ -486,10 +487,10 @@ public class MockInterviewService {
 
     public InterviewSession resumeSession(String sessionId) {
         InterviewSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND, "面试会话不存在: " + sessionId));
 
         if (!"IN_PROGRESS".equals(session.getStatus()) && !"PAUSED".equals(session.getStatus())) {
-            throw new RuntimeException("只能恢复进行中或暂停中的面试会话");
+            throw new BusinessException(ErrorCode.SESSION_CANNOT_RESUME, "只能恢复进行中或暂停中的面试会话");
         }
 
         // 恢复时确保状态为 IN_PROGRESS
@@ -506,6 +507,7 @@ public class MockInterviewService {
         session.addMessage(resumeMsg);
 
         sessionRepository.save(session);
+        sessionRepository.saveToPg(session);
         return session;
     }
 
@@ -514,22 +516,18 @@ public class MockInterviewService {
      */
     public InterviewSession endInterview(String sessionId) {
         InterviewSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND, "面试会话不存在: " + sessionId));
+
+        if ("COMPLETED".equals(session.getStatus())) {
+            throw new BusinessException(ErrorCode.SESSION_ALREADY_COMPLETED, "面试已结束，无法重复结束");
+        }
         session.setStatus("COMPLETED");
         session.setCompletedAt(java.time.LocalDateTime.now());
         sessionRepository.save(session);
+        sessionRepository.saveToPg(session);
 
-        // 自动触发评估（异步，不阻塞主流程）
-        new Thread(() -> {
-            try {
-                log.info("面试结束，自动触发评估: sessionId={}", sessionId);
-                EvaluationReport report = evaluationEngine.evaluate(session);
-                log.info("评估完成: sessionId={}, overallScore={}, verdict={}",
-                        sessionId, report.getOverallScore(), report.getVerdict());
-            } catch (Exception e) {
-                log.error("自动评估失败: sessionId={}, error={}", sessionId, e.getMessage());
-            }
-        }).start();
+        // 自动触发异步评估
+        asyncEvaluate(session);
 
         return session;
     }
@@ -539,12 +537,13 @@ public class MockInterviewService {
      */
     public InterviewSession pauseSession(String sessionId) {
         InterviewSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND, "面试会话不存在: " + sessionId));
         if (!"IN_PROGRESS".equals(session.getStatus())) {
-            throw new RuntimeException("只能暂停进行中的面试");
+            throw new BusinessException(ErrorCode.SESSION_CANNOT_PAUSE, "只能暂停进行中的面试");
         }
         session.setStatus("PAUSED");
         sessionRepository.save(session);
+        sessionRepository.saveToPg(session);
         return session;
     }
 
@@ -553,13 +552,68 @@ public class MockInterviewService {
      */
     public InterviewSession unpauseSession(String sessionId) {
         InterviewSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND, "面试会话不存在: " + sessionId));
         if (!"PAUSED".equals(session.getStatus())) {
-            throw new RuntimeException("只能恢复已暂停的面试");
+            throw new BusinessException(ErrorCode.SESSION_CANNOT_RESUME, "只能恢复已暂停的面试");
         }
         session.setStatus("IN_PROGRESS");
         sessionRepository.save(session);
+        sessionRepository.saveToPg(session);
         return session;
+    }
+
+    /**
+     * 异步评分（Spring 管理的虚拟线程池）
+     */
+    @Async("scoreExecutor")
+    public void asyncScoreAnswer(String sessionId, String currentQuestion, String candidateAnswer,
+                                  String currentStage, String answerMsgId) {
+        try {
+            RealTimeScoreService.ScoreResult result = realTimeScoreService
+                    .scoreAnswer(currentQuestion, candidateAnswer, currentStage);
+            if (result != null) {
+                // 重新加载 session 避免竞态条件
+                InterviewSession freshSession = sessionRepository.findById(sessionId).orElse(null);
+                if (freshSession != null) {
+                    freshSession.getMessages().stream()
+                            .filter(m -> answerMsgId.equals(m.getId()))
+                            .findFirst()
+                            .ifPresent(msg -> {
+                                msg.setScore(result.score);
+                                msg.setScoreFeedback(result.feedback);
+                            });
+                    sessionRepository.save(freshSession);
+                    log.info("实时评分完成: score={}, feedback={}", result.score, result.feedback);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("实时评分异步失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 异步评估（Spring 管理的虚拟线程池）
+     */
+    @Async("evaluationExecutor")
+    public void asyncEvaluate(InterviewSession session) {
+        try {
+            log.info("面试结束，自动触发评估: sessionId={}", session.getSessionId());
+            EvaluationReport report = evaluationEngine.evaluate(session);
+            log.info("评估完成: sessionId={}, overallScore={}, verdict={}",
+                    session.getSessionId(), report.getOverallScore(), report.getVerdict());
+
+            // 将评估结果写回 PostgreSQL 持久化记录，确保仪表盘统计能正确计算平均分
+            interviewRecordRepository.findById(session.getSessionId()).ifPresent(record -> {
+                record.setOverallScore(report.getOverallScore());
+                record.setVerdict(report.getVerdict());
+                record.setUpdatedAt(LocalDateTime.now());
+                interviewRecordRepository.save(record);
+                log.info("评估结果已写入 PostgreSQL: sessionId={}, overallScore={}, verdict={}",
+                        session.getSessionId(), report.getOverallScore(), report.getVerdict());
+            });
+        } catch (Exception e) {
+            log.error("自动评估失败: sessionId={}, error={}", session.getSessionId(), e.getMessage());
+        }
     }
 
     /**
@@ -583,6 +637,65 @@ public class MockInterviewService {
         log.info("批量删除面试会话: count={}", sessionIds.size());
         sessionRepository.deleteByIds(sessionIds);
         return sessionIds.size();
+    }
+
+    /**
+     * 分页搜索面试历史
+     */
+    public Page<InterviewSessionRecord> searchSessions(String candidateId, String direction,
+                                                        String status, LocalDateTime startTime,
+                                                        LocalDateTime endTime, int page, int size) {
+        // 给时间参数默认值，避免传 null 导致 PostgreSQL 无法推断参数类型
+        if (startTime == null) {
+            startTime = LocalDateTime.of(1970, 1, 1, 0, 0);
+        }
+        if (endTime == null) {
+            endTime = LocalDateTime.of(2099, 12, 31, 23, 59);
+        }
+        return interviewRecordRepository.searchSessions(
+                candidateId, direction, status, startTime, endTime,
+                PageRequest.of(page, size)
+        );
+    }
+
+    /**
+     * 获取面试数据仪表盘统计
+     */
+    public Map<String, Object> getDashboardStats() {
+        Map<String, Object> stats = new HashMap<>();
+
+        long totalSessions = interviewRecordRepository.count();
+        long completedSessions = interviewRecordRepository.countByStatus("COMPLETED");
+        long inProgressSessions = interviewRecordRepository.countByStatus("IN_PROGRESS");
+        double averageScore = interviewRecordRepository.getAverageScore();
+        long passedCount = interviewRecordRepository.countPassed();
+        double passRate = completedSessions > 0 ? (double) passedCount / completedSessions * 100 : 0;
+
+        stats.put("totalSessions", totalSessions);
+        stats.put("completedSessions", completedSessions);
+        stats.put("inProgressSessions", inProgressSessions);
+        stats.put("averageScore", Math.round(averageScore * 10.0) / 10.0);
+        stats.put("passRate", Math.round(passRate * 10.0) / 10.0);
+
+        List<Map<String, Object>> directionStats = new ArrayList<>();
+        for (Object[] row : interviewRecordRepository.countByDirection()) {
+            directionStats.add(Map.of("direction", row[0], "count", row[1]));
+        }
+        stats.put("directionStats", directionStats);
+
+        List<Map<String, Object>> statusStats = new ArrayList<>();
+        for (Object[] row : interviewRecordRepository.countByStatus()) {
+            statusStats.add(Map.of("status", row[0], "count", row[1]));
+        }
+        stats.put("statusStats", statusStats);
+
+        List<Map<String, Object>> dailyStats = new ArrayList<>();
+        for (Object[] row : interviewRecordRepository.countByDate(LocalDateTime.now().minusDays(30))) {
+            dailyStats.add(Map.of("date", row[0].toString(), "count", row[1]));
+        }
+        stats.put("dailyStats", dailyStats);
+
+        return stats;
     }
 
     /**

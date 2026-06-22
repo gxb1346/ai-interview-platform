@@ -1,5 +1,7 @@
 package com.interview.modules.evaluation.export;
 
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import com.interview.modules.evaluation.engine.UnifiedEvaluationEngine;
 import com.interview.modules.evaluation.model.EvaluationReport;
 import com.interview.modules.interview.model.InterviewSession;
@@ -36,7 +38,7 @@ public class EvaluationController {
     @PostMapping("/sessions/{sessionId}")
     public ResponseEntity<EvaluationReport> evaluate(@PathVariable String sessionId) {
         InterviewSession session = interviewService.getSession(sessionId)
-                .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND, "面试会话不存在: " + sessionId));
 
         EvaluationReport report = evaluationEngine.evaluate(session);
 
@@ -59,7 +61,7 @@ public class EvaluationController {
     @PostMapping("/sessions/{sessionId}/export-pdf")
     public ResponseEntity<Map<String, Object>> evaluateAndExport(@PathVariable String sessionId) {
         InterviewSession session = interviewService.getSession(sessionId)
-                .orElseThrow(() -> new RuntimeException("面试会话不存在: " + sessionId));
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND, "面试会话不存在: " + sessionId));
 
         EvaluationReport report = evaluationEngine.evaluate(session);
 

@@ -1,7 +1,9 @@
 /**
  * API 工具模块
- * 统一管理 JWT Token 和后端 API 调用
+ * 统一管理 JWT Token、自动刷新、后端 API 调用
  */
+
+import type { DashboardStats, SessionSearchParams, SpringPage, SessionRecord, UserProfile, TokenRefreshResponse } from "./types";
 
 const API_BASE = "http://localhost:8082";
 
@@ -15,8 +17,17 @@ export function setToken(token: string) {
   localStorage.setItem("auth_token", token);
 }
 
+export function getRefreshToken(): string | null {
+  return localStorage.getItem("refresh_token");
+}
+
+export function setRefreshToken(token: string) {
+  localStorage.setItem("refresh_token", token);
+}
+
 export function clearToken() {
   localStorage.removeItem("auth_token");
+  localStorage.removeItem("refresh_token");
   localStorage.removeItem("auth_user");
 }
 
@@ -37,9 +48,63 @@ export function isAuthenticated(): boolean {
   return !!getToken();
 }
 
+// ─── Token 自动刷新 ───────────────────────────────────────────────────
+
+let isRefreshing = false;
+let refreshPromise: Promise<boolean> | null = null;
+
+/** 尝试使用 refreshToken 刷新 accessToken */
+async function tryRefreshToken(): Promise<boolean> {
+  const rt = getRefreshToken();
+  if (!rt) return false;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: rt }),
+    });
+    if (res.ok) {
+      const data: TokenRefreshResponse = await res.json();
+      setToken(data.token);
+      setRefreshToken(data.refreshToken);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** 带自动刷新的 fetch */
+async function fetchWithRefresh(url: string, options: RequestInit = {}): Promise<Response> {
+  const res = await fetch(url, options);
+
+  if (res.status === 401) {
+    if (!isRefreshing) {
+      isRefreshing = true;
+      refreshPromise = tryRefreshToken().finally(() => {
+        isRefreshing = false;
+        refreshPromise = null;
+      });
+    }
+    const success = await refreshPromise;
+    if (success) {
+      const token = getToken();
+      const headers = { ...(options.headers as Record<string, string> || {}) };
+      headers["Authorization"] = `Bearer ${token}`;
+      return fetch(url, { ...options, headers });
+    }
+    clearToken();
+    window.location.reload();
+    throw new Error("Token 已过期，请重新登录");
+  }
+
+  return res;
+}
+
 // ─── 通用 API 请求封装 ─────────────────────────────────────────────────
 
-/** 带认证的 fetch 包装，自动添加 Authorization 头 */
 export function authFetch(input: string, init?: RequestInit): Promise<Response> {
   const token = getToken();
   const headers: Record<string, string> = {};
@@ -49,7 +114,7 @@ export function authFetch(input: string, init?: RequestInit): Promise<Response> 
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
-  return fetch(input, { ...init, headers });
+  return fetchWithRefresh(input, { ...init, headers });
 }
 
 export async function apiFetch<T = any>(
@@ -58,7 +123,6 @@ export async function apiFetch<T = any>(
 ): Promise<T> {
   const token = getToken();
 
-  // 合并 headers：不要覆盖 Content-Type，FormData 时让浏览器自动设置
   const headers: Record<string, string> = {};
   if (options.headers) {
     Object.assign(headers, options.headers);
@@ -70,19 +134,11 @@ export async function apiFetch<T = any>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchWithRefresh(`${API_BASE}${path}`, {
     ...options,
     headers,
   });
 
-  // 401 → 清除 token 并刷新页面（跳转到登录页）
-  if (res.status === 401) {
-    clearToken();
-    window.location.reload();
-    throw new Error("未登录或 Token 已过期");
-  }
-
-  // 204 No Content
   if (res.status === 204) {
     return undefined as T;
   }
@@ -94,17 +150,52 @@ export async function apiFetch<T = any>(
 
 export const authApi = {
   register: (username: string, password: string, displayName?: string) =>
-    apiFetch<{ token: string; username: string; displayName: string; email: string }>("/api/auth/register", {
+    apiFetch<{ token: string; refreshToken: string; username: string; displayName: string; email: string }>("/api/auth/register", {
       method: "POST",
       body: JSON.stringify({ username, password, displayName }),
     }),
 
   login: (username: string, password: string) =>
-    apiFetch<{ token: string; username: string; displayName: string; email: string }>("/api/auth/login", {
+    apiFetch<{ token: string; refreshToken: string; username: string; displayName: string; email: string }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
 
   me: () =>
-    apiFetch<{ username: string; displayName: string; email: string }>("/api/auth/me"),
+    apiFetch<UserProfile>("/api/auth/me"),
+
+  /** 修改密码 */
+  changePassword: (oldPassword: string, newPassword: string) =>
+    apiFetch<{ message: string }>("/api/auth/password", {
+      method: "PUT",
+      body: JSON.stringify({ oldPassword, newPassword }),
+    }),
+
+  /** 更新个人信息 */
+  updateProfile: (displayName: string, email: string) =>
+    apiFetch<UserProfile>("/api/auth/profile", {
+      method: "PUT",
+      body: JSON.stringify({ displayName, email }),
+    }),
+};
+
+// ─── 面试 API ─────────────────────────────────────────────────────────
+
+export const interviewApi = {
+  /** 仪表盘统计 */
+  getDashboardStats: () =>
+    apiFetch<DashboardStats>("/api/mock-interview/dashboard/stats"),
+
+  /** 面试历史搜索 */
+  searchSessions: (params: SessionSearchParams) => {
+    const query = new URLSearchParams();
+    query.set("page", String(params.page));
+    query.set("size", String(params.size));
+    if (params.candidateId) query.set("candidateId", params.candidateId);
+    if (params.direction) query.set("direction", params.direction);
+    if (params.status) query.set("status", params.status);
+    if (params.startTime) query.set("startTime", params.startTime);
+    if (params.endTime) query.set("endTime", params.endTime);
+    return apiFetch<SpringPage<SessionRecord>>(`/api/mock-interview/sessions/search?${query.toString()}`);
+  },
 };

@@ -310,3 +310,81 @@ export const STAGE_LABELS: Record<string, string> = {
   projectDeep: "项目深挖",
   qaRound: "反问环节"
 };
+
+/* ===== P1 新增类型 ===== */
+
+/** 仪表盘统计数据 */
+export interface DashboardStats {
+  totalSessions: number;
+  completedSessions: number;
+  inProgressSessions: number;
+  averageScore: number;
+  passRate: number;
+  directionStats: { direction: string; count: number }[];
+  statusStats: { status: string; count: number }[];
+  dailyStats: { date: string; count: number }[];
+}
+
+/** 面试历史搜索条件 */
+export interface SessionSearchParams {
+  candidateId?: string;
+  direction?: string;
+  status?: string;
+  startTime?: string;
+  endTime?: string;
+  page: number;
+  size: number;
+}
+
+/** 面试会话记录（后端分页返回） */
+export interface SessionRecord {
+  sessionId: string;
+  candidateId: string;
+  candidateName: string;
+  direction: string;
+  level: string;
+  mode: string;
+  status: string;
+  totalRounds: number;
+  overallScore: number;
+  verdict: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+/** 后端分页返回（Spring Data Page） */
+export interface SpringPage<T> {
+  content: T[];
+  totalElements: number;
+  totalPages: number;
+  number: number;
+  size: number;
+}
+
+/** 修改密码请求 */
+export interface ChangePasswordRequest {
+  oldPassword: string;
+  newPassword: string;
+}
+
+/** 更新个人信息请求 */
+export interface UpdateProfileRequest {
+  displayName: string;
+  email: string;
+}
+
+/** 用户信息 */
+export interface UserProfile {
+  username: string;
+  displayName: string;
+  email: string;
+  role: string;
+  userId: number;
+}
+
+/** Token 刷新 */
+export interface TokenRefreshResponse {
+  token: string;
+  refreshToken: string;
+}

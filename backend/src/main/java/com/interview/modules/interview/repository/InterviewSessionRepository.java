@@ -1,9 +1,16 @@
 package com.interview.modules.interview.repository;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import com.interview.modules.interview.model.InterviewSession;
+import com.interview.modules.interview.model.InterviewSessionRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
+
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -11,11 +18,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
- * 面试会话 Redis 存储
- * 支持断点续面，服务重启不丢数据
+ * 面试会话存储（Redis 缓存 + PostgreSQL 持久化双写）
+ * Redis 作为热数据缓存，PG 作为永久存储，支持断点续面和历史数据分析
  */
 @Repository
 public class InterviewSessionRepository {
+
+    private static final Logger log = LoggerFactory.getLogger(InterviewSessionRepository.class);
 
     private static final String SESSION_PREFIX = "interview:session:";
     private static final String CANDIDATE_SESSIONS_PREFIX = "interview:candidate:";
@@ -23,14 +32,18 @@ public class InterviewSessionRepository {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    private final InterviewSessionRecordRepository pgRepository;
 
-    public InterviewSessionRepository(StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
+    public InterviewSessionRepository(StringRedisTemplate redisTemplate,
+                                       ObjectMapper objectMapper,
+                                       InterviewSessionRecordRepository pgRepository) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
+        this.pgRepository = pgRepository;
     }
 
     /**
-     * 保存面试会话
+     * 保存面试会话（Redis + PostgreSQL 双写）
      */
     public void save(InterviewSession session) {
         session.setUpdatedAt(LocalDateTime.now());
@@ -46,7 +59,39 @@ public class InterviewSessionRepository {
                 redisTemplate.expire(indexKey, SESSION_TTL_HOURS, TimeUnit.HOURS);
             }
         } catch (Exception e) {
-            throw new RuntimeException("Redis 存储面试会话失败: " + e.getMessage(), e);
+            log.error("Redis 存储面试会话失败: sessionId={}", session.getSessionId(), e);
+            throw new BusinessException(ErrorCode.SESSION_SAVE_FAILED, "Redis 存储面试会话失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 保存面试会话到 PostgreSQL（异步双写，失败不影响 Redis 主流程）
+     * 在关键状态变更时调用：PREPARING → IN_PROGRESS → COMPLETED
+     */
+    @Transactional
+    public void saveToPg(InterviewSession session) {
+        try {
+            InterviewSessionRecord record = pgRepository.findById(session.getSessionId())
+                    .orElseGet(InterviewSessionRecord::new);
+            record.setSessionId(session.getSessionId());
+            record.setCandidateId(session.getCandidateId());
+            record.setCandidateName(session.getCandidateName());
+            record.setDirection(session.getDirection());
+            record.setLevel(session.getLevel());
+            record.setMode(session.getMode());
+            record.setStatus(session.getStatus());
+            record.setTotalRounds(session.getCurrentRound());
+            record.setSessionJson(objectMapper.writeValueAsString(session));
+            record.setUpdatedAt(LocalDateTime.now());
+            if (record.getCreatedAt() == null) {
+                record.setCreatedAt(session.getCreatedAt() != null ? session.getCreatedAt() : LocalDateTime.now());
+            }
+            if ("COMPLETED".equals(session.getStatus())) {
+                record.setCompletedAt(session.getCompletedAt());
+            }
+            pgRepository.save(record);
+        } catch (Exception e) {
+            log.warn("PostgreSQL 保存面试会话失败（不影响 Redis 主流程）: sessionId={}", session.getSessionId(), e);
         }
     }
 
@@ -58,7 +103,7 @@ public class InterviewSessionRepository {
             String sessionKey = sessionKey(sessionId);
             String json = redisTemplate.opsForValue().get(sessionKey);
             if (json == null) {
-                System.err.println("[Redis] 会话不存在: " + sessionId);
+                log.debug("[Redis] 会话不存在: {}", sessionId);
                 return Optional.empty();
             }
             // 访问时续期 TTL，避免活跃会话过期
@@ -66,7 +111,7 @@ public class InterviewSessionRepository {
             InterviewSession session = objectMapper.readValue(json, InterviewSession.class);
             return Optional.of(session);
         } catch (Exception e) {
-            System.err.println("[Redis] 会话反序列化失败: " + sessionId + " - " + e.getMessage());
+            log.error("[Redis] 会话反序列化失败: {} - {}", sessionId, e.getMessage());
             return Optional.empty();
         }
     }
@@ -79,7 +124,7 @@ public class InterviewSessionRepository {
             String indexKey = candidateIndexKey(candidateId);
             Set<String> sessionIds = redisTemplate.opsForSet().members(indexKey);
             if (sessionIds == null || sessionIds.isEmpty()) return Collections.emptyList();
-    
+
             return sessionIds.stream()
                     .map(this::findById)
                     .filter(Optional::isPresent)
@@ -89,7 +134,7 @@ public class InterviewSessionRepository {
             return Collections.emptyList();
         }
     }
-    
+
     /**
      * 查询候选人所有进行中或暂停中的会话（用于续面）
      */
@@ -133,6 +178,11 @@ public class InterviewSessionRepository {
                 String indexKey = candidateIndexKey(session.getCandidateId());
                 redisTemplate.opsForSet().remove(indexKey, sessionId);
             }
+        }
+        try {
+            pgRepository.deleteById(sessionId);
+        } catch (Exception e) {
+            log.warn("PostgreSQL 删除会话失败: sessionId={}", sessionId, e);
         }
     }
 

@@ -2,6 +2,8 @@ package com.interview.modules.interview.service;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -134,7 +136,7 @@ public class AudioService {
             }
         }
 
-        throw lastException != null ? lastException : new RuntimeException("Edge-TTS 所有重试均失败");
+        throw lastException != null ? lastException : new BusinessException(ErrorCode.TTS_SERVICE_ERROR, "Edge-TTS 所有重试均失败");
     }
 
     /**
@@ -170,7 +172,7 @@ public class AudioService {
         if (statusCode != 200) {
             log.warn("Edge-TTS 返回非 200 状态码: {}, body={}",
                     statusCode, responseEntity.getBody());
-            throw new RuntimeException("Edge-TTS HTTP " + statusCode);
+            throw new BusinessException(ErrorCode.TTS_SERVICE_ERROR, "Edge-TTS HTTP " + statusCode);
         }
 
         String responseBody = responseEntity.getBody();
@@ -178,7 +180,7 @@ public class AudioService {
         JsonObject respJson = gson.fromJson(responseBody, JsonObject.class);
         if (respJson == null || !respJson.has("audio")) {
             log.warn("Edge-TTS 响应缺少 audio 字段: {}", responseBody);
-            throw new RuntimeException("Edge-TTS 响应缺少 audio 字段");
+            throw new BusinessException(ErrorCode.TTS_SERVICE_ERROR, "Edge-TTS 响应缺少 audio 字段");
         }
 
         return respJson.get("audio").getAsString();

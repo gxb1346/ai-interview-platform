@@ -2,6 +2,7 @@ package com.interview.modules.interview.service;
 
 import com.interview.modules.interview.model.*;
 import com.interview.modules.interview.repository.InterviewSessionRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +14,7 @@ import java.util.UUID;
  * JD（职位描述）解析服务
  * LLM 动态提取面试分类并匹配共享题库
  */
+@Slf4j
 @Service
 public class JDParseService {
 
@@ -65,7 +67,7 @@ public class JDParseService {
 
             return parseResponse(response);
         } catch (Exception e) {
-            System.err.println("JD 解析失败: " + e.getMessage());
+            log.warn("JD 解析失败: {}", e.getMessage());
             return new JDParseResult("Java后端开发", List.of("通用技能"), 3, List.of());
         }
     }
@@ -82,7 +84,7 @@ public class JDParseService {
             var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             return mapper.readValue(cleaned, JDParseResult.class);
         } catch (Exception e) {
-            System.err.println("JD Parse JSON 解析失败: " + e.getMessage());
+            log.warn("JD Parse JSON 解析失败: {}", e.getMessage());
             return new JDParseResult("Java后端开发", List.of("通用技能"), 3, List.of());
         }
     }

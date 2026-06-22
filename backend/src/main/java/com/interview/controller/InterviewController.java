@@ -1,10 +1,12 @@
 package com.interview.controller;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/interview")
 public class InterviewController {
@@ -25,8 +27,7 @@ public class InterviewController {
                     .content();
             return Map.of("reply", response);
         } catch (Exception e) {
-            System.err.println("AI对话异常: " + e.getMessage());
-            e.printStackTrace();
+            log.error("AI对话异常: {}", e.getMessage(), e);
             return Map.of("reply", "AI对话失败: " + e.getMessage());
         }
     }

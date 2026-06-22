@@ -2,6 +2,8 @@ package com.interview.modules.resume.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import com.interview.common.result.PageResult;
 import com.interview.infrastructure.stream.model.TaskType;
 import com.interview.infrastructure.stream.producer.TaskProducer;
@@ -11,6 +13,8 @@ import com.interview.modules.resume.model.ResumeUpdateDTO;
 import com.interview.modules.resume.model.ResumeVO;
 import com.interview.modules.resume.model.TalentStatus;
 import com.interview.modules.resume.repository.ResumeRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -45,6 +49,8 @@ public class ResumeService {
 
     private static final String RESUME_CACHE_PREFIX = "resume:analysis:";
     private static final long CACHE_TTL_HOURS = 168; // 7天
+
+    private static final Logger log = LoggerFactory.getLogger(ResumeService.class);
 
     private final TikaService tikaService;
     private final ResumeAnalysisService analysisService;
@@ -106,7 +112,7 @@ public class ResumeService {
             cacheKey = buildCacheKey(contentHash, targetJob);
             cachedJson = redisTemplate.opsForValue().get(cacheKey);
         } catch (Exception e) {
-            System.err.println("Redis 查询失败，降级到直接AI分析: " + e.getMessage());
+            log.warn("Redis 查询失败，降级到直接AI分析: {}", e.getMessage());
         }
 
         if (cachedJson != null) {
@@ -185,7 +191,7 @@ public class ResumeService {
         try {
             return java.util.Base64.getEncoder().encodeToString(file.getBytes());
         } catch (java.io.IOException e) {
-            throw new RuntimeException("读取文件字节失败: " + e.getMessage(), e);
+            throw new BusinessException(ErrorCode.RESUME_PARSE_FAILED, "读取文件字节失败: " + e.getMessage());
         }
     }
 
@@ -211,7 +217,7 @@ public class ResumeService {
             resume.setWeaknessesJson(objectMapper.writeValueAsString(result.getWeaknesses()));
             resume.setHighlightsJson(objectMapper.writeValueAsString(result.getHighlights()));
         } catch (JsonProcessingException e) {
-            throw new RuntimeException("JSON 序列化失败", e);
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "JSON 序列化失败");
         }
         resume.setAnalyzedAt(LocalDateTime.now());
         return ResumeVO.fromEntity(resume);
@@ -242,7 +248,7 @@ public class ResumeService {
             resume.setWeaknessesJson(objectMapper.writeValueAsString(result.getWeaknesses()));
             resume.setHighlightsJson(objectMapper.writeValueAsString(result.getHighlights()));
         } catch (Exception e) {
-            throw new RuntimeException("JSON 序列化失败", e);
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "JSON 序列化失败");
         }
 
         resume.setAnalyzedAt(LocalDateTime.now());
@@ -255,7 +261,7 @@ public class ResumeService {
             redisTemplate.opsForValue().set(cacheKey, json, CACHE_TTL_HOURS, TimeUnit.HOURS);
         } catch (Exception e) {
             // 缓存写入失败不影响主流程
-            System.err.println("Redis 缓存写入失败: " + e.getMessage());
+            log.warn("Redis 缓存写入失败: {}", e.getMessage());
         }
     }
 
@@ -270,7 +276,7 @@ public class ResumeService {
             byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("MD5 不可用", e);
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "MD5 不可用");
         }
     }
 
@@ -383,7 +389,7 @@ public class ResumeService {
             if (dto.getHighlights() != null)
                 resume.setHighlightsJson(objectMapper.writeValueAsString(dto.getHighlights()));
         } catch (JsonProcessingException e) {
-            throw new RuntimeException("JSON 序列化失败", e);
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "JSON 序列化失败");
         }
 
         Resume saved = resumeRepository.save(resume);
@@ -462,7 +468,7 @@ public class ResumeService {
             Resume saved = resumeRepository.save(resume);
             return ResumeVO.fromEntity(saved);
         } catch (IllegalArgumentException e) {
-            throw new RuntimeException("无效的人才库状态: " + status);
+            throw new BusinessException(ErrorCode.TALENT_STATUS_INVALID, "无效的人才库状态: " + status);
         }
     }
 
@@ -491,7 +497,7 @@ public class ResumeService {
                     RequestBody.fromInputStream(file.getInputStream(), file.getSize())
             );
         } catch (Exception e) {
-            throw new RuntimeException("文件上传到存储服务失败: " + e.getMessage(), e);
+            throw new BusinessException(ErrorCode.FILE_UPLOAD_FAILED, "文件上传到存储服务失败: " + e.getMessage());
         }
         return key;
     }

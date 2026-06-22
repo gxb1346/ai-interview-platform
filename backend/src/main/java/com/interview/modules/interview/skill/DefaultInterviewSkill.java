@@ -3,6 +3,7 @@ package com.interview.modules.interview.skill;
 import com.interview.modules.interview.model.InterviewQuestion;
 import com.interview.modules.interview.model.InterviewLevel;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 
 import java.util.ArrayList;
@@ -15,6 +16,7 @@ import java.util.stream.Collectors;
  * 默认面试 Skill 实现
  * 基于 Spring AI ChatClient 动态生成题目
  */
+@Slf4j
 public class DefaultInterviewSkill implements InterviewSkill {
 
     private final String directionName;
@@ -181,7 +183,7 @@ public class DefaultInterviewSkill implements InterviewSkill {
             List<InterviewQuestion> parsed = parseQuestions(response, count, level, stage);
             // 如果AI返回的题目数量远少于要求，使用fallback
             if (parsed.size() < Math.max(1, count / 2)) {
-                System.err.println("AI出题数量不足(" + parsed.size() + "/" + count + ")，使用fallback");
+                log.warn("AI出题数量不足({}/{})，使用fallback", parsed.size(), count);
                 return generateFallbackQuestions(count, level, stage);
             }
             return parsed;
@@ -319,7 +321,7 @@ public class DefaultInterviewSkill implements InterviewSkill {
                 questions.add(q);
             }
         } catch (Exception e) {
-            System.err.println("解析 AI 出题 JSON 失败: " + e.getMessage());
+            log.warn("解析 AI 出题 JSON 失败: {}", e.getMessage());
             return generateFallbackQuestions(count, level, stage);
         }
 

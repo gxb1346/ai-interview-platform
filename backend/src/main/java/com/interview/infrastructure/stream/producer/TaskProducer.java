@@ -2,6 +2,8 @@ package com.interview.infrastructure.stream.producer;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import com.interview.infrastructure.stream.config.RedisStreamConfig;
 import com.interview.infrastructure.stream.model.StreamMessage;
 import com.interview.infrastructure.stream.model.TaskType;
@@ -55,7 +57,7 @@ public class TaskProducer {
             return message.getTaskId();
         } catch (JsonProcessingException e) {
             log.error("[RedisStream] 消息序列化失败: type={}", taskType, e);
-            throw new RuntimeException("Redis Stream 消息序列化失败: " + e.getMessage(), e);
+            throw new BusinessException(ErrorCode.TASK_CREATE_FAILED, "Redis Stream 消息序列化失败: " + e.getMessage());
         }
     }
 
@@ -82,7 +84,7 @@ public class TaskProducer {
             return message.getTaskId();
         } catch (JsonProcessingException e) {
             log.error("[RedisStream] 消息序列化失败: type={}", taskType, e);
-            throw new RuntimeException("Redis Stream 消息序列化失败: " + e.getMessage(), e);
+            throw new BusinessException(ErrorCode.TASK_CREATE_FAILED, "Redis Stream 消息序列化失败: " + e.getMessage());
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.interview.modules.resume.service;
 
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import org.apache.tika.Tika;
 import org.apache.tika.exception.TikaException;
 import org.springframework.stereotype.Service;
@@ -34,7 +36,7 @@ public class TikaService {
             // PDF → PDFParser, DOCX → OOXMLParser, TXT → TXTParser
             return tika.parseToString(inputStream);
         } catch (IOException | TikaException e) {
-            throw new RuntimeException("文档解析失败: " + fileName + " - " + e.getMessage(), e);
+            throw new BusinessException(ErrorCode.RESUME_PARSE_FAILED, "文档解析失败: " + fileName + " - " + e.getMessage());
         }
     }
 
@@ -45,7 +47,7 @@ public class TikaService {
         try {
             return tika.parseToString(inputStream);
         } catch (IOException | TikaException e) {
-            throw new RuntimeException("文档解析失败: " + fileName + " - " + e.getMessage(), e);
+            throw new BusinessException(ErrorCode.DOCUMENT_PARSE_FAILED, "文档解析失败: " + fileName + " - " + e.getMessage());
         }
     }
 

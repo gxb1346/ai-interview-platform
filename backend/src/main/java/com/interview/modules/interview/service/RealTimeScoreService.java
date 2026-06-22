@@ -2,6 +2,8 @@ package com.interview.modules.interview.service;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
@@ -86,13 +88,13 @@ public class RealTimeScoreService {
                         .content();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw new RuntimeException("评分被中断", e);
+                throw new BusinessException(ErrorCode.AI_SERVICE_ERROR, "评分被中断");
             } catch (Exception e) {
                 lastException = e;
                 log.warn("实时评分第{}次调用失败: {}", attempt + 1, e.getMessage());
             }
         }
-        throw new RuntimeException("实时评分所有重试均失败", lastException);
+        throw new BusinessException(ErrorCode.AI_SERVICE_ERROR, "实时评分所有重试均失败");
     }
 
     private String buildScorePrompt(String question, String answer, String stage) {

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { BrainCircuit, Loader2, Eye, EyeOff, CheckCircle2, AlertCircle } from "lucide-react";
-import { authApi, setToken, setStoredUser } from "../api";
+import { authApi, setToken, setRefreshToken, setStoredUser } from "../api";
 
 interface LoginViewProps {
   onLoginSuccess: () => void;
@@ -29,6 +29,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
       if (tab === "login") {
         const res = await authApi.login(username.trim(), password);
         setToken(res.token);
+        if (res.refreshToken) setRefreshToken(res.refreshToken);
         setStoredUser({ username: res.username, displayName: res.displayName || res.username });
         onLoginSuccess();
       } else {

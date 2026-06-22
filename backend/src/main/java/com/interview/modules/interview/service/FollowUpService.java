@@ -1,5 +1,7 @@
 package com.interview.modules.interview.service;
 
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import com.interview.modules.interview.model.InterviewQuestion;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -43,13 +45,13 @@ public class FollowUpService {
                         .content();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw new RuntimeException("AI调用被中断", e);
+                throw new BusinessException(ErrorCode.AI_SERVICE_ERROR, "AI调用被中断");
             } catch (Exception e) {
                 lastException = e;
                 log.warn("AI {} 第{}次调用失败: {}", callType, attempt + 1, e.getMessage());
             }
         }
-        throw new RuntimeException("AI " + callType + " 所有重试均失败", lastException);
+        throw new BusinessException(ErrorCode.AI_SERVICE_ERROR, "AI " + callType + " 所有重试均失败");
     }
 
     /**

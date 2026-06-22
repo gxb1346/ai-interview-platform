@@ -1,6 +1,8 @@
 package com.interview.infrastructure.stream.consumer.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import com.interview.infrastructure.stream.consumer.TaskHandler;
 import com.interview.infrastructure.stream.model.StreamMessage;
 import com.interview.modules.knowledge.model.KnowledgeDocument;
@@ -80,7 +82,7 @@ public class DocumentIndexTaskHandler implements TaskHandler {
             // 1. 文本分块
             List<String> chunks = splitText(rawText);
             if (chunks.isEmpty()) {
-                throw new RuntimeException("文档内容太少，无法分块");
+                throw new BusinessException(ErrorCode.DOCUMENT_INDEX_FAILED, "文档内容太少，无法分块");
             }
 
             // 2. 构建 Document 列表
@@ -113,7 +115,7 @@ public class DocumentIndexTaskHandler implements TaskHandler {
                     vectorStore.add(batch);
                 } catch (Exception batchEx) {
                     log.error("[文档索引]   批次 {}/{} 写入失败: {}", batchIndex, totalBatches, batchEx.getMessage());
-                    throw new RuntimeException("向量化批次 " + batchIndex + "/" + totalBatches + " 失败: " + batchEx.getMessage(), batchEx);
+                    throw new BusinessException(ErrorCode.DOCUMENT_INDEX_FAILED, "向量化批次 " + batchIndex + "/" + totalBatches + " 失败: " + batchEx.getMessage());
                 }
             }
 

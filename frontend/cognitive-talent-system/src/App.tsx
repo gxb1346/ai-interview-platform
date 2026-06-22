@@ -20,7 +20,9 @@ import {
   Video,
   ClipboardList,
   BookOpen,
-  Database
+  Database,
+  LayoutDashboard,
+  Settings
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8082";
@@ -38,6 +40,8 @@ import ScheduleView from "./components/ScheduleView";
 import ResumeManageView from "./components/ResumeManageView";
 import KnowledgeBaseView from "./components/KnowledgeBaseView";
 import KnowledgeQAView from "./components/KnowledgeQAView";
+import DashboardView from "./components/DashboardView";
+import SettingsView from "./components/SettingsView";
 
 // Auth
 import LoginView from "./components/LoginView";
@@ -71,6 +75,7 @@ import { isAuthenticated, clearToken, getStoredUser, authFetch, getToken } from 
 }
 
 type ActiveView =
+  | "DASHBOARD"
   | "RESUME_ANALYSIS"
   | "RESUME_MANAGE"
   | "TALENT_POOL"
@@ -79,7 +84,8 @@ type ActiveView =
   | "INTERVIEW_RECORDS"
   | "SCHEDULE"
   | "KNOWLEDGE_BASE"
-  | "KNOWLEDGE_QA";
+  | "KNOWLEDGE_QA"
+  | "SETTINGS";
 
 // 从 localStorage 读取数据，失败则回退到预设数据
 function loadFromStorage<T>(key: string, fallback: T): T {
@@ -97,7 +103,7 @@ function saveToStorage<T>(key: string, data: T) {
 }
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<ActiveView>("RESUME_ANALYSIS");
+  const [currentView, setCurrentView] = useState<ActiveView>("DASHBOARD");
   const [loggedIn, setLoggedIn] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   
@@ -269,6 +275,8 @@ export default function App() {
   // Switch View name label maps
   const getViewTitle = () => {
     switch (currentView) {
+      case "DASHBOARD":
+        return "系统仪表盘";
       case "RESUME_ANALYSIS":
         return "简历分析";
       case "RESUME_MANAGE":
@@ -287,6 +295,8 @@ export default function App() {
         return "知识库管理";
       case "KNOWLEDGE_QA":
         return "知识问答助手";
+      case "SETTINGS":
+        return "账号设置";
       default:
         return "系统仪表盘";
     }
@@ -353,6 +363,7 @@ export default function App() {
             {/* Menu Links navigation */}
             <nav className="space-y-1.5 pt-2">
               {[
+                { id: "DASHBOARD", label: "仪表盘", icon: LayoutDashboard },
                 { id: "RESUME_ANALYSIS", label: "简历分析", icon: FileText },
                 { id: "RESUME_MANAGE", label: "简历管理", icon: ClipboardList },
                 { id: "TALENT_POOL", label: "人才库", icon: Users },
@@ -387,7 +398,6 @@ export default function App() {
           {/* User profile bottom corner */}
           <div className="border-t border-slate-200 pt-4 mt-6">
             <div className="flex items-center gap-3 group">
-              {/* 头像：取 displayName 首字符 */}
               <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center text-white text-sm font-bold shadow-sm shrink-0">
                 {authUser?.displayName?.charAt(0)?.toUpperCase() || "U"}
               </div>
@@ -399,6 +409,13 @@ export default function App() {
                   {authUser?.username || ""}
                 </span>
               </div>
+              <button
+                onClick={() => setCurrentView("SETTINGS")}
+                title="账号设置"
+                className="w-7 h-7 rounded-lg hover:bg-slate-100 hover:text-primary flex items-center justify-center text-slate-400 transition cursor-pointer"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
               <button
                 onClick={handleLogout}
                 title="退出登录"
@@ -461,6 +478,10 @@ export default function App() {
 
           {/* Active View Router Content Container */}
           <div className="p-6 max-w-7xl mx-auto w-full flex-1">
+            {currentView === "DASHBOARD" && (
+              <DashboardView />
+            )}
+
             {currentView === "RESUME_ANALYSIS" && (
               <ResumeAnalysisView
                 onAddCandidate={handleAddCandidate}
@@ -512,7 +533,7 @@ export default function App() {
             )}
 
             {currentView === "INTERVIEW_RECORDS" && (
-              <InterviewRecordsView scoreCards={scoreCards} onDeleteScoreCard={handleDeleteScoreCard} onBatchDeleteScoreCards={handleBatchDeleteScoreCards} />
+              <InterviewRecordsView />
             )}
 
             {currentView === "SCHEDULE" && (
@@ -535,6 +556,10 @@ export default function App() {
               <KnowledgeQAView
                 onNavigateBack={() => setCurrentView("KNOWLEDGE_BASE")}
               />
+            )}
+
+            {currentView === "SETTINGS" && (
+              <SettingsView />
             )}
           </div>
         </main>

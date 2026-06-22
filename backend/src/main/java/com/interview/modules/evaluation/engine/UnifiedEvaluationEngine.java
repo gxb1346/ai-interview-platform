@@ -8,12 +8,14 @@ import com.interview.modules.interview.model.InterviewMessage;
 import com.interview.modules.interview.model.InterviewSession;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 /**
@@ -21,6 +23,7 @@ import java.util.stream.Collectors;
  * 文字面试和语音面试共用同一套评估逻辑
  * 架构：分批评估 -> 结构化输出 -> 二次汇总 -> 降级兜底
  */
+@Slf4j
 @Component
 public class UnifiedEvaluationEngine {
 
@@ -29,14 +32,17 @@ public class UnifiedEvaluationEngine {
     private final ChatClient evaluationClient;
     private final ObjectMapper objectMapper;
     private final ChatResponseHelper chatHelper;
+    private final ExecutorService evaluationExecutor;
 
     public UnifiedEvaluationEngine(ChatClient.Builder chatClientBuilder,
-                                    ChatResponseHelper chatHelper) {
+                                    ChatResponseHelper chatHelper,
+                                    @Qualifier("evaluationExecutor") ExecutorService evaluationExecutor) {
         this.evaluationClient = chatClientBuilder
                 .defaultSystem("你是一个资深的 AI 面试评估专家，负责对面试对话进行多维度量化评估。")
                 .build();
         this.objectMapper = new ObjectMapper();
         this.chatHelper = chatHelper;
+        this.evaluationExecutor = evaluationExecutor;
     }
 
     /**
@@ -48,21 +54,18 @@ public class UnifiedEvaluationEngine {
     public EvaluationReport evaluate(InterviewSession session) {
         List<InterviewMessage> messages = session.getMessages();
 
-        // 1. 分批评估（对话太长则分块，每块独立评估）
+        // 1. 分批评估（对话太长则分块，每块独立评估，并行执行）
         List<EvaluationResult> batchResults = batchEvaluate(messages);
 
-        // 2. 结构化输出约束（强制 JSON Schema）
-        EvaluationReport structuredReport = structuredOutput(batchResults, session);
+        // 2. 结构化输出（从批次结果中计算综合评分，不再额外调用 LLM，大幅提升速度）
+        EvaluationReport report = structuredOutput(batchResults, session);
 
-        // 3. 二次汇总（独立 Prompt 做最终汇总）
-        EvaluationReport finalReport = aggregate(structuredReport, batchResults);
-
-        // 4. 降级兜底（AI 调用失败时返回模板报告）
-        if (finalReport == null) {
-            finalReport = fallbackReport(session);
+        // 3. 降级兜底（AI 调用失败时返回模板报告）
+        if (report.getSummary() == null || report.getSummary().isEmpty()) {
+            return fallbackReport(session);
         }
 
-        return finalReport;
+        return report;
     }
 
     /**
@@ -84,7 +87,7 @@ public class UnifiedEvaluationEngine {
 
             CompletableFuture<EvaluationResult> future = CompletableFuture.supplyAsync(() ->
                     evaluateBatch(batchMessages, batchIdx, finalStart, finalEnd),
-                    Executors.newVirtualThreadPerTaskExecutor()
+                    evaluationExecutor
             );
             futures.add(future);
         }
@@ -94,7 +97,7 @@ public class UnifiedEvaluationEngine {
             try {
                 results.add(future.get());
             } catch (Exception e) {
-                System.err.println("分批评估失败: " + e.getMessage());
+                log.warn("分批评估失败: {}", e.getMessage());
             }
         }
 
@@ -145,6 +148,7 @@ public class UnifiedEvaluationEngine {
                     请以 JSON 格式返回：
                     {
                         "batchScore": 综合评分,
+                        "dimensionScores": {"technical": 1, "communication": 1, "problemSolving": 1, "culturalFit": 1},
                         "strengths": ["优势1"],
                         "weaknesses": ["待改进1", "待改进2"],
                         "summary": "评估摘要..."
@@ -156,7 +160,7 @@ public class UnifiedEvaluationEngine {
             return parseBatchResult(response, batchIndex, roundStart, roundEnd);
 
         } catch (Exception e) {
-            System.err.println("批次评估异常: " + e.getMessage());
+            log.warn("批次评估异常: {}", e.getMessage());
             EvaluationResult fallback = new EvaluationResult();
             fallback.setBatchId("batch_" + batchIndex);
             fallback.setBatchIndex(batchIndex);
@@ -193,6 +197,16 @@ public class UnifiedEvaluationEngine {
             if (data.get("weaknesses") instanceof List) {
                 result.setBatchWeaknesses((List<String>) data.get("weaknesses"));
             }
+            if (data.get("dimensionScores") instanceof Map) {
+                Map<String, Object> scores = (Map<String, Object>) data.get("dimensionScores");
+                Map<String, Integer> parsed = new LinkedHashMap<>();
+                for (Map.Entry<String, Object> entry : scores.entrySet()) {
+                    parsed.put(entry.getKey(), entry.getValue() instanceof Integer
+                            ? (Integer) entry.getValue()
+                            : Integer.parseInt(entry.getValue().toString()));
+                }
+                result.setDimensionScores(parsed);
+            }
         } catch (Exception e) {
             result.setBatchScore(50);
             result.setBatchSummary("解析批次评估结果失败。");
@@ -202,11 +216,10 @@ public class UnifiedEvaluationEngine {
     }
 
     /**
-     * 结构化输出
+     * 结构化输出（无 LLM 调用，纯计算，快速）
      */
     private EvaluationReport structuredOutput(List<EvaluationResult> batchResults,
                                                InterviewSession session) {
-        // 从批次结果中提取结构化信息
         EvaluationReport report = new EvaluationReport();
         report.setReportId(UUID.randomUUID().toString());
         report.setSessionId(session.getSessionId());
@@ -236,6 +249,49 @@ public class UnifiedEvaluationEngine {
 
         report.setStrengths(allStrengths.size() > 3 ? allStrengths.subList(0, 3) : allStrengths);
         report.setImprovements(allWeaknesses.size() > 2 ? allWeaknesses.subList(0, 2) : allWeaknesses);
+
+        // 汇总各批次评估摘要，生成最终总结
+        String combinedSummary = batchResults.stream()
+                .map(r -> String.format("【第%d批(第%d-%d轮)】%s",
+                        r.getBatchIndex() + 1, r.getRoundStart() + 1, r.getRoundEnd(),
+                        r.getBatchSummary()))
+                .collect(Collectors.joining("\n"));
+        report.setSummary(combinedSummary.isEmpty() ? "评估完成，暂无详细总结。" : combinedSummary);
+
+        // 根据综合评分判定结论
+        int score = report.getOverallScore();
+        if (score >= 80) {
+            report.setVerdict("建议录用");
+        } else if (score >= 60) {
+            report.setVerdict("待定");
+        } else {
+            report.setVerdict("不予录用");
+        }
+
+        // 维度评分：从批次结果中取平均值
+        Map<String, Integer> avgDimensions = new LinkedHashMap<>();
+        List<Map<String, Integer>> allDimensionScores = batchResults.stream()
+                .map(EvaluationResult::getDimensionScores)
+                .filter(scores -> scores != null && !scores.isEmpty())
+                .collect(Collectors.toList());
+
+        if (!allDimensionScores.isEmpty()) {
+            String[] dims = {"technical", "communication", "problemSolving", "culturalFit"};
+            for (String dim : dims) {
+                double avg = allDimensionScores.stream()
+                        .filter(scores -> scores.containsKey(dim))
+                        .mapToInt(scores -> scores.get(dim))
+                        .average()
+                        .orElse(3.0);
+                avgDimensions.put(dim, (int) Math.round(avg));
+            }
+        } else {
+            avgDimensions.put("technical", 3);
+            avgDimensions.put("communication", 3);
+            avgDimensions.put("problemSolving", 3);
+            avgDimensions.put("culturalFit", 3);
+        }
+        report.setDimensionScores(avgDimensions);
 
         return report;
     }
@@ -289,7 +345,7 @@ public class UnifiedEvaluationEngine {
             return parseAggregationResult(response, structuredReport);
 
         } catch (Exception e) {
-            System.err.println("二次汇总失败: " + e.getMessage());
+            log.warn("二次汇总失败: {}", e.getMessage());
             return null;
         }
     }

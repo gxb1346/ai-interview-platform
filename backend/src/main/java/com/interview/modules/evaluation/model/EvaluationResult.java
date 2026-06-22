@@ -1,6 +1,7 @@
 package com.interview.modules.evaluation.model;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 分批评估结果
@@ -15,6 +16,7 @@ public class EvaluationResult {
     private List<String> batchStrengths;
     private List<String> batchWeaknesses;
     private String batchSummary;
+    private Map<String, Integer> dimensionScores;  // 各维度评分
 
     public EvaluationResult() {}
 
@@ -42,4 +44,7 @@ public class EvaluationResult {
 
     public String getBatchSummary() { return batchSummary; }
     public void setBatchSummary(String batchSummary) { this.batchSummary = batchSummary; }
+
+    public Map<String, Integer> getDimensionScores() { return dimensionScores; }
+    public void setDimensionScores(Map<String, Integer> dimensionScores) { this.dimensionScores = dimensionScores; }
 }

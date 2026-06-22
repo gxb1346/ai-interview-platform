@@ -1,6 +1,8 @@
 package com.interview.infrastructure.stream.consumer.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
 import com.interview.common.result.Result;
 import com.interview.infrastructure.stream.consumer.TaskHandler;
 import com.interview.infrastructure.stream.model.StreamMessage;
@@ -141,7 +143,7 @@ public class ResumeAnalysisTaskHandler implements TaskHandler {
             resume.setWeaknessesJson(objectMapper.writeValueAsString(result.getWeaknesses()));
             resume.setHighlightsJson(objectMapper.writeValueAsString(result.getHighlights()));
         } catch (Exception e) {
-            throw new RuntimeException("JSON 序列化失败", e);
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "JSON 序列化失败");
         }
         resume.setAnalyzedAt(java.time.LocalDateTime.now());
         return resumeRepository.save(resume);
