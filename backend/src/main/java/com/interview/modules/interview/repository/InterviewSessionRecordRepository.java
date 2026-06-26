@@ -3,6 +3,7 @@ package com.interview.modules.interview.repository;
 import com.interview.modules.interview.model.InterviewSessionRecord;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -87,4 +88,20 @@ public interface InterviewSessionRecordRepository extends JpaRepository<Intervie
      */
     @Query("SELECT COUNT(s) FROM InterviewSessionRecord s WHERE s.status = 'COMPLETED' AND s.verdict = 'PASS'")
     long countPassed();
+
+    /**
+     * 仪表盘综合统计（一次查询替代多次独立查询，大幅减少数据库连接开销）
+     */
+    @Query(value = """
+        SELECT
+            (SELECT COUNT(*) FROM interview_session_records) AS total,
+            (SELECT COUNT(*) FROM interview_session_records WHERE status = 'COMPLETED') AS completed,
+            (SELECT COUNT(*) FROM interview_session_records WHERE status = 'IN_PROGRESS') AS in_progress,
+            (SELECT COALESCE(AVG(overall_score), 0) FROM interview_session_records WHERE status = 'COMPLETED') AS avg_score,
+            (SELECT COUNT(*) FROM interview_session_records WHERE status = 'COMPLETED' AND verdict = 'PASS') AS passed,
+            (SELECT STRING_AGG(direction || ':' || cnt, ',') FROM (SELECT direction, COUNT(*) AS cnt FROM interview_session_records GROUP BY direction) t) AS direction_stats,
+            (SELECT STRING_AGG(status || ':' || cnt, ',') FROM (SELECT status, COUNT(*) AS cnt FROM interview_session_records GROUP BY status) t) AS status_stats,
+            (SELECT STRING_AGG(d::text || ':' || cnt, ',') FROM (SELECT DATE(created_at) AS d, COUNT(*) AS cnt FROM interview_session_records WHERE created_at >= :since GROUP BY DATE(created_at) ORDER BY DATE(created_at)) t) AS daily_stats
+        """, nativeQuery = true)
+    List<Object[]> getDashboardStatsAll(@Param("since") LocalDateTime since);
 }

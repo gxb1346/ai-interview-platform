@@ -29,6 +29,16 @@ public class UnifiedEvaluationEngine {
 
     private static final int BATCH_SIZE = 5;  // 每批次评估 5 轮对话
 
+    /** 各阶段评分权重（总和=1.0），技术考察和项目深挖占主导 */
+    private static final Map<String, Double> STAGE_SCORE_WEIGHTS = new LinkedHashMap<>();
+
+    static {
+        STAGE_SCORE_WEIGHTS.put("selfIntro", 0.10);    // 自我介绍 10%
+        STAGE_SCORE_WEIGHTS.put("techExam", 0.45);     // 技术考察 45%
+        STAGE_SCORE_WEIGHTS.put("projectDeep", 0.40);  // 项目深挖 40%
+        STAGE_SCORE_WEIGHTS.put("qaRound", 0.05);      // 反问环节 5%
+    }
+
     private final ChatClient evaluationClient;
     private final ObjectMapper objectMapper;
     private final ChatResponseHelper chatHelper;
@@ -85,8 +95,11 @@ public class UnifiedEvaluationEngine {
             int batchIdx = i;
             List<InterviewMessage> batchMessages = messages.subList(finalStart, finalEnd);
 
+            // 确定该批次所属阶段（取批次中多数消息的阶段）
+            String batchStage = determineBatchStage(batchMessages);
+
             CompletableFuture<EvaluationResult> future = CompletableFuture.supplyAsync(() ->
-                    evaluateBatch(batchMessages, batchIdx, finalStart, finalEnd),
+                    evaluateBatch(batchMessages, batchIdx, finalStart, finalEnd, batchStage),
                     evaluationExecutor
             );
             futures.add(future);
@@ -108,14 +121,16 @@ public class UnifiedEvaluationEngine {
      * 评估单个批次
      */
     private EvaluationResult evaluateBatch(List<InterviewMessage> messages, int batchIndex,
-                                            int roundStart, int roundEnd) {
+                                            int roundStart, int roundEnd, String stage) {
         try {
             String conversationLog = messages.stream()
                     .map(m -> String.format("[%s]: %s", m.getSender(), m.getText()))
                     .collect(Collectors.joining("\n"));
 
+            String stageLabel = getStageLabel(stage);
+
             String prompt = String.format("""
-                    你是一个严格的 AI 面试评估专家。请对以下面试对话（第 %d 批，共 %d 轮）进行严厉、客观的评估。
+                    你是一个严格的 AI 面试评估专家。请对以下面试对话（第 %d 批，共 %d 轮，阶段：%s）进行严厉、客观的评估。
 
                     对话内容：
                     ---
@@ -132,6 +147,7 @@ public class UnifiedEvaluationEngine {
                     7. 问题解决（problemSolving）：无实质内容则不得超过 2 分
                     8. 综合素质（culturalFit）：无实质内容则不得超过 2 分
                     9. 正常完整回答按实际水平客观评分
+                    %s
 
                     请从以下维度评分（1-10分）：
                     1. 技术深度（technical）
@@ -153,11 +169,12 @@ public class UnifiedEvaluationEngine {
                         "weaknesses": ["待改进1", "待改进2"],
                         "summary": "评估摘要..."
                     }
-                    """, batchIndex, roundEnd - roundStart, conversationLog);
+                    """, batchIndex, roundEnd - roundStart, stageLabel, conversationLog,
+                    getStageScoringHint(stage));
 
             String response = chatHelper.call(LlmCallMonitor.BATCH_EVALUATION, evaluationClient, prompt);
 
-            return parseBatchResult(response, batchIndex, roundStart, roundEnd);
+            return parseBatchResult(response, batchIndex, roundStart, roundEnd, stage);
 
         } catch (Exception e) {
             log.warn("批次评估异常: {}", e.getMessage());
@@ -166,6 +183,7 @@ public class UnifiedEvaluationEngine {
             fallback.setBatchIndex(batchIndex);
             fallback.setRoundStart(roundStart);
             fallback.setRoundEnd(roundEnd);
+            fallback.setStage(stage);
             fallback.setBatchScore(50);
             fallback.setBatchStrengths(new ArrayList<>());
             fallback.setBatchWeaknesses(new ArrayList<>());
@@ -176,13 +194,14 @@ public class UnifiedEvaluationEngine {
 
     @SuppressWarnings("unchecked")
     private EvaluationResult parseBatchResult(String response, int batchIndex,
-                                               int roundStart, int roundEnd) {
+                                               int roundStart, int roundEnd, String stage) {
         String cleaned = cleanJson(response);
         EvaluationResult result = new EvaluationResult();
         result.setBatchId("batch_" + batchIndex);
         result.setBatchIndex(batchIndex);
         result.setRoundStart(roundStart);
         result.setRoundEnd(roundEnd);
+        result.setStage(stage);
         result.setBatchStrengths(new ArrayList<>());
         result.setBatchWeaknesses(new ArrayList<>());
 
@@ -230,12 +249,9 @@ public class UnifiedEvaluationEngine {
         report.setMode(session.getMode());
         report.setTotalRounds(session.getCurrentRound());
 
-        // 加权计算综合分
-        double avgScore = batchResults.stream()
-                .mapToInt(EvaluationResult::getBatchScore)
-                .average()
-                .orElse(50.0);
-        report.setOverallScore((int) Math.round(avgScore));
+        // 按阶段加权计算综合分（技术考察和项目深挖权重更高，自我介绍和反问环节权重较低）
+        double weightedScore = calculateStageWeightedScore(batchResults);
+        report.setOverallScore((int) Math.round(weightedScore));
 
         // 收集优势和改进项
         List<String> allStrengths = batchResults.stream()
@@ -411,5 +427,105 @@ public class UnifiedEvaluationEngine {
             if (cleaned.endsWith("```")) cleaned = cleaned.substring(0, cleaned.length() - 3).trim();
         }
         return cleaned;
+    }
+
+    /**
+     * 确定批次所属阶段（取批次中多数候选人消息的阶段）
+     */
+    private String determineBatchStage(List<InterviewMessage> batchMessages) {
+        Map<String, Long> stageCounts = batchMessages.stream()
+                .filter(m -> "candidate".equals(m.getSender()))
+                .map(InterviewMessage::getStage)
+                .filter(Objects::nonNull)
+                .collect(Collectors.groupingBy(s -> s, Collectors.counting()));
+
+        if (stageCounts.isEmpty()) {
+            // 没有候选人消息时，取第一条消息的阶段
+            return batchMessages.stream()
+                    .map(InterviewMessage::getStage)
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .orElse("techExam");
+        }
+
+        return stageCounts.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse("techExam");
+    }
+
+    /**
+     * 按阶段权重计算综合评分
+     */
+    private double calculateStageWeightedScore(List<EvaluationResult> batchResults) {
+        // 按阶段分组
+        Map<String, List<EvaluationResult>> stageGroups = batchResults.stream()
+                .collect(Collectors.groupingBy(r ->
+                        r.getStage() != null ? r.getStage() : "techExam"));
+
+        double totalWeight = 0.0;
+        double weightedSum = 0.0;
+
+        for (Map.Entry<String, List<EvaluationResult>> entry : stageGroups.entrySet()) {
+            String stage = entry.getKey();
+            List<EvaluationResult> stageBatches = entry.getValue();
+
+            // 该阶段内各批次取平均分
+            double stageAvg = stageBatches.stream()
+                    .mapToInt(EvaluationResult::getBatchScore)
+                    .average()
+                    .orElse(50.0);
+
+            // 获取该阶段的评分权重
+            double weight = STAGE_SCORE_WEIGHTS.getOrDefault(stage, 0.25);
+            weightedSum += stageAvg * weight;
+            totalWeight += weight;
+
+            log.debug("阶段[{}]: 批次平均={}, 权重={}, 加权贡献={}",
+                    getStageLabel(stage), String.format("%.1f", stageAvg),
+                    weight, String.format("%.1f", stageAvg * weight));
+        }
+
+        // 如果所有阶段都没有匹配到权重（理论上不会），降级为简单平均
+        if (totalWeight == 0.0) {
+            return batchResults.stream()
+                    .mapToInt(EvaluationResult::getBatchScore)
+                    .average()
+                    .orElse(50.0);
+        }
+
+        // 归一化（确保权重总和为1.0，即使某些阶段缺失）
+        double finalScore = weightedSum / totalWeight;
+        log.info("阶段加权评分: 加权和={}, 总权重={}, 最终分={}",
+                String.format("%.1f", weightedSum), totalWeight, String.format("%.1f", finalScore));
+        return finalScore;
+    }
+
+    /**
+     * 获取阶段的中文标签
+     */
+    private String getStageLabel(String stage) {
+        if (stage == null) return "未知阶段";
+        return switch (stage) {
+            case "selfIntro" -> "自我介绍";
+            case "techExam" -> "技术考察";
+            case "projectDeep" -> "项目深挖";
+            case "qaRound" -> "反问环节";
+            default -> stage;
+        };
+    }
+
+    /**
+     * 根据阶段给出评分提示（让AI了解该阶段的评分侧重点）
+     */
+    private String getStageScoringHint(String stage) {
+        if (stage == null) return "";
+        return switch (stage) {
+            case "selfIntro" -> """
+                    10. 注意：这是自我介绍环节，侧重考察沟通表达和综合素质，技术深度维度请适当降低要求""";
+            case "qaRound" -> """
+                    10. 注意：这是反问环节，侧重考察候选人的主动性和思考深度，技术深度维度请适当降低要求""";
+            default -> "";
+        };
     }
 }

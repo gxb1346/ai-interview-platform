@@ -6,6 +6,7 @@ import com.interview.modules.evaluation.engine.UnifiedEvaluationEngine;
 import com.interview.modules.evaluation.model.EvaluationReport;
 import com.interview.modules.interview.model.InterviewSession;
 import com.interview.modules.interview.service.MockInterviewService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,6 +17,7 @@ import java.util.concurrent.CompletableFuture;
 /**
  * 面试评估 API 控制器
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/evaluation")
 public class EvaluationController {
@@ -45,11 +47,18 @@ public class EvaluationController {
         // 面试完成后自动异步生成 PDF
         pdfExportService.exportReport(report);
 
-        // 评估后自动将会话标记为已完成（移出未完成面试列表）
+        // 评估后直接将评分结果持久化到 PostgreSQL（无论会话是否已完成）
         try {
-            interviewService.endInterview(sessionId);
+            interviewService.endInterview(sessionId, report);
+        } catch (BusinessException e) {
+            // 如果会话已经是 COMPLETED 状态（自动结束场景），仍然需要将评分写入 PG
+            if (ErrorCode.SESSION_ALREADY_COMPLETED.equals(e.getErrorCode())) {
+                log.info("会话已完成，直接更新评分到 PostgreSQL: sessionId={}, score={}", 
+                        sessionId, report.getOverallScore());
+                interviewService.updateEvaluationScore(sessionId, report);
+            }
         } catch (Exception ignored) {
-            // 已完成的会话不报错
+            // 其他异常静默处理，评分结果依然返回给前端
         }
 
         return ResponseEntity.ok(report);

@@ -31,10 +31,10 @@ public class DocumentIndexTaskHandler implements TaskHandler {
     private static final Logger log = LoggerFactory.getLogger(DocumentIndexTaskHandler.class);
 
     /** 每个分块的最大字符数 */
-    private static final int CHUNK_MAX_LENGTH = 800;
+    private static final int CHUNK_MAX_LENGTH = 1500;
 
     /** 分块重叠字符数 */
-    private static final int CHUNK_OVERLAP = 100;
+    private static final int CHUNK_OVERLAP = 200;
 
     /** 单次写入 pgvector 的最大分块数 */
     private static final int BATCH_SIZE = 10;

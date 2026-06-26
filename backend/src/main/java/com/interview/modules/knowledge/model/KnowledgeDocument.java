@@ -49,6 +49,10 @@ public class KnowledgeDocument {
     @Column(length = 32, unique = true)
     private String contentHash;
 
+    /** 文档原始文本内容（用于重新索引） */
+    @Column(columnDefinition = "TEXT")
+    private String rawText;
+
     /** 上传时间 */
     @Column(nullable = false)
     private LocalDateTime createdAt;
@@ -98,6 +102,9 @@ public class KnowledgeDocument {
 
     public String getContentHash() { return contentHash; }
     public void setContentHash(String contentHash) { this.contentHash = contentHash; }
+
+    public String getRawText() { return rawText; }
+    public void setRawText(String rawText) { this.rawText = rawText; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

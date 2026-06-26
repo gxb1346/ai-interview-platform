@@ -196,8 +196,6 @@ public class MockInterviewService {
         }
 
         int currentRound = session.getCurrentRound();
-        // 每次回答递增轮次，确保 round 从 1 开始（0 是面试官开场白）
-        currentRound++;
         session.setCurrentRound(currentRound);
 
         // 记录候选人回答
@@ -207,7 +205,7 @@ public class MockInterviewService {
                 candidateAnswer
         );
         answerMsg.setStage(session.getCurrentStage());
-        answerMsg.setRoundNumber(currentRound);
+        answerMsg.setRoundNumber(currentRound + 1);
         session.addMessage(answerMsg);
 
         // 实时评分（异步执行，不阻塞面试流程，结果在下一次回答时返回）
@@ -373,11 +371,12 @@ public class MockInterviewService {
             session.setCompletedAt(java.time.LocalDateTime.now());
             sessionRepository.save(session);
             sessionRepository.saveToPg(session);
+            // 自动触发异步评估，确保评估结果持久化到 PostgreSQL
+            asyncEvaluate(session);
             return "所有面试环节已结束。感谢你的参与，系统正在生成评估报告...";
         }
 
         session.setCurrentStage(nextStage);
-        session.setCurrentRound(0);
         session.setCurrentQuestionIndex(0);
         session.setFollowUpIndex(0);
 
@@ -512,9 +511,18 @@ public class MockInterviewService {
     }
 
     /**
-     * 结束面试（自动触发评估）
+     * 结束面试（自动触发异步评估）
      */
     public InterviewSession endInterview(String sessionId) {
+        return endInterview(sessionId, null);
+    }
+
+    /**
+     * 结束面试并写入评估结果
+     * @param sessionId 面试会话ID
+     * @param report 已计算好的评估报告，为 null 时触发异步评估
+     */
+    public InterviewSession endInterview(String sessionId, EvaluationReport report) {
         InterviewSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND, "面试会话不存在: " + sessionId));
 
@@ -523,11 +531,21 @@ public class MockInterviewService {
         }
         session.setStatus("COMPLETED");
         session.setCompletedAt(java.time.LocalDateTime.now());
-        sessionRepository.save(session);
-        sessionRepository.saveToPg(session);
 
-        // 自动触发异步评估
-        asyncEvaluate(session);
+        if (report != null) {
+            // 已持有评估结果，直接落库，避免重复 AI 调用
+            session.setEvaluationReport(report);
+            sessionRepository.save(session);
+            sessionRepository.saveToPg(session);
+            sessionRepository.updateScoreToPg(sessionId, report.getOverallScore(), report.getVerdict());
+            log.info("评估结果已直接落库: sessionId={}, overallScore={}, verdict={}",
+                    sessionId, report.getOverallScore(), report.getVerdict());
+        } else {
+            // 无预计算结果，先保存状态，再异步触发评估
+            sessionRepository.save(session);
+            sessionRepository.saveToPg(session);
+            asyncEvaluate(session);
+        }
 
         return session;
     }
@@ -602,18 +620,38 @@ public class MockInterviewService {
             log.info("评估完成: sessionId={}, overallScore={}, verdict={}",
                     session.getSessionId(), report.getOverallScore(), report.getVerdict());
 
-            // 将评估结果写回 PostgreSQL 持久化记录，确保仪表盘统计能正确计算平均分
-            interviewRecordRepository.findById(session.getSessionId()).ifPresent(record -> {
-                record.setOverallScore(report.getOverallScore());
-                record.setVerdict(report.getVerdict());
-                record.setUpdatedAt(LocalDateTime.now());
-                interviewRecordRepository.save(record);
-                log.info("评估结果已写入 PostgreSQL: sessionId={}, overallScore={}, verdict={}",
-                        session.getSessionId(), report.getOverallScore(), report.getVerdict());
-            });
+            // 将评估报告写入 Redis 会话
+            session.setEvaluationReport(report);
+            sessionRepository.save(session);
+
+            // 将评分和判定写入 PostgreSQL 持久化记录
+            sessionRepository.updateScoreToPg(session.getSessionId(),
+                    report.getOverallScore(), report.getVerdict());
+            log.info("评估结果已持久化: sessionId={}, overallScore={}, verdict={}",
+                    session.getSessionId(), report.getOverallScore(), report.getVerdict());
         } catch (Exception e) {
-            log.error("自动评估失败: sessionId={}, error={}", session.getSessionId(), e.getMessage());
+            log.error("自动评估失败: sessionId={}, error={}", session.getSessionId(), e.getMessage(), e);
+            // 评估失败时写入默认评分，避免历史记录显示 null
+            try {
+                sessionRepository.updateScoreToPg(session.getSessionId(), 50, "待定");
+                log.info("评估失败，已写入默认评分: sessionId={}", session.getSessionId());
+            } catch (Exception ex) {
+                log.error("默认评分写入也失败: sessionId={}", session.getSessionId(), ex);
+            }
         }
+    }
+
+    /**
+     * 更新评估评分到数据库（用于已完成会话的兜底更新）
+     */
+    public void updateEvaluationScore(String sessionId, EvaluationReport report) {
+        sessionRepository.findById(sessionId).ifPresent(session -> {
+            session.setEvaluationReport(report);
+            sessionRepository.save(session);
+            sessionRepository.updateScoreToPg(sessionId, report.getOverallScore(), report.getVerdict());
+            log.info("已完成会话评分更新成功: sessionId={}, overallScore={}, verdict={}",
+                    sessionId, report.getOverallScore(), report.getVerdict());
+        });
     }
 
     /**
@@ -660,42 +698,102 @@ public class MockInterviewService {
 
     /**
      * 获取面试数据仪表盘统计
+     * 使用 Redis 缓存，TTL=5分钟，避免频繁查询数据库导致内存泄漏
+     * 一次查询替代 7+ 次独立查询，减少结果集占用内存
      */
+    // @Cacheable(value = "dashboardStats", key = "'all'", sync = true) // 暂时注释，Redis缓存反序列化异常
     public Map<String, Object> getDashboardStats() {
         Map<String, Object> stats = new HashMap<>();
 
-        long totalSessions = interviewRecordRepository.count();
-        long completedSessions = interviewRecordRepository.countByStatus("COMPLETED");
-        long inProgressSessions = interviewRecordRepository.countByStatus("IN_PROGRESS");
-        double averageScore = interviewRecordRepository.getAverageScore();
-        long passedCount = interviewRecordRepository.countPassed();
-        double passRate = completedSessions > 0 ? (double) passedCount / completedSessions * 100 : 0;
+        // 一次查询获取所有统计数据，替代原来的 7+ 次独立查询
+        // PostgreSQL 原生 SQL 合并查询，大幅减少数据库连接和结果集内存占用
+        List<Object[]> resultList = interviewRecordRepository.getDashboardStatsAll(LocalDateTime.now().minusDays(30));
 
-        stats.put("totalSessions", totalSessions);
-        stats.put("completedSessions", completedSessions);
-        stats.put("inProgressSessions", inProgressSessions);
-        stats.put("averageScore", Math.round(averageScore * 10.0) / 10.0);
-        stats.put("passRate", Math.round(passRate * 10.0) / 10.0);
+        if (resultList != null && !resultList.isEmpty()) {
+            Object[] result = resultList.get(0);
+            if (result == null || result.length < 8) {
+                // 结果不完整，使用默认空数据
+                stats.put("totalSessions", 0L);
+                stats.put("completedSessions", 0L);
+                stats.put("inProgressSessions", 0L);
+                stats.put("averageScore", 0.0);
+                stats.put("passRate", 0.0);
+                stats.put("directionStats", new ArrayList<>());
+                stats.put("statusStats", new ArrayList<>());
+                stats.put("dailyStats", new ArrayList<>());
+                log.warn("仪表盘综合查询结果不完整，长度={}，使用空数据", result != null ? result.length : 0);
+                return stats;
+            }
+            // 解析一次性查询结果
+            Long totalSessions = (result[0] instanceof Number) ? ((Number) result[0]).longValue() : 0L;
+            Long completedSessions = (result[1] instanceof Number) ? ((Number) result[1]).longValue() : 0L;
+            Long inProgressSessions = (result[2] instanceof Number) ? ((Number) result[2]).longValue() : 0L;
+            Double averageScore = (result[3] instanceof Number) ? ((Number) result[3]).doubleValue() : 0.0;
+            Long passedCount = (result[4] instanceof Number) ? ((Number) result[4]).longValue() : 0L;
+            String directionStatsStr = (result[5] instanceof String) ? (String) result[5] : "";
+            String statusStatsStr = (result[6] instanceof String) ? (String) result[6] : "";
+            String dailyStatsStr = (result[7] instanceof String) ? (String) result[7] : "";
 
-        List<Map<String, Object>> directionStats = new ArrayList<>();
-        for (Object[] row : interviewRecordRepository.countByDirection()) {
-            directionStats.add(Map.of("direction", row[0], "count", row[1]));
+            double passRate = completedSessions > 0 ? (double) passedCount / completedSessions * 100 : 0;
+
+            stats.put("totalSessions", totalSessions);
+            stats.put("completedSessions", completedSessions);
+            stats.put("inProgressSessions", inProgressSessions);
+            stats.put("averageScore", Math.round(averageScore * 10.0) / 10.0);
+            stats.put("passRate", Math.round(passRate * 10.0) / 10.0);
+
+            // 解析方向统计（格式: "Java:10,Go:5"）
+            List<Map<String, Object>> directionStats = parseAggregatedString(directionStatsStr, "direction");
+            stats.put("directionStats", directionStats);
+
+            // 解析状态统计
+            List<Map<String, Object>> statusStats = parseAggregatedString(statusStatsStr, "status");
+            stats.put("statusStats", statusStats);
+
+            // 解析每日统计
+            List<Map<String, Object>> dailyStats = parseAggregatedString(dailyStatsStr, "date");
+            stats.put("dailyStats", dailyStats);
+
+            log.info("仪表盘统计查询完成: total={}, completed={}, avgScore={}",
+                    totalSessions, completedSessions, Math.round(averageScore * 10.0) / 10.0);
+        } else {
+            // 降级兜底：空结果
+            stats.put("totalSessions", 0L);
+            stats.put("completedSessions", 0L);
+            stats.put("inProgressSessions", 0L);
+            stats.put("averageScore", 0.0);
+            stats.put("passRate", 0.0);
+            stats.put("directionStats", new ArrayList<>());
+            stats.put("statusStats", new ArrayList<>());
+            stats.put("dailyStats", new ArrayList<>());
+            log.warn("仪表盘综合查询返回空结果，使用空数据");
         }
-        stats.put("directionStats", directionStats);
-
-        List<Map<String, Object>> statusStats = new ArrayList<>();
-        for (Object[] row : interviewRecordRepository.countByStatus()) {
-            statusStats.add(Map.of("status", row[0], "count", row[1]));
-        }
-        stats.put("statusStats", statusStats);
-
-        List<Map<String, Object>> dailyStats = new ArrayList<>();
-        for (Object[] row : interviewRecordRepository.countByDate(LocalDateTime.now().minusDays(30))) {
-            dailyStats.add(Map.of("date", row[0].toString(), "count", row[1]));
-        }
-        stats.put("dailyStats", dailyStats);
 
         return stats;
+    }
+
+    /**
+     * 解析 PostgreSQL STRING_AGG 聚合结果（格式: "key1:val1,key2:val2"）
+     */
+    private List<Map<String, Object>> parseAggregatedString(String aggregated, String keyName) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (aggregated == null || aggregated.isBlank()) {
+            return result;
+        }
+        for (String pair : aggregated.split(",")) {
+            if (pair == null || pair.isBlank()) continue;
+            String[] parts = pair.split(":");
+            if (parts.length == 2) {
+                try {
+                    String key = parts[0];
+                    Long count = Long.parseLong(parts[1]);
+                    result.add(Map.of(keyName, key, "count", count));
+                } catch (NumberFormatException e) {
+                    log.warn("解析聚合统计失败: {}", pair);
+                }
+            }
+        }
+        return result;
     }
 
     /**

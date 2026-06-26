@@ -47,7 +47,7 @@ public class AudioController {
     @Value("${AI_API_KEY}")
     private String apiKey;
 
-    @Value("${AI_MODEL:qwen-turbo}")
+    @Value("${AI_MODEL:qwen3.5-flash}")
     private String aiModel;
 
     @PostConstruct
@@ -441,6 +441,3 @@ public class AudioController {
         };
     }
 }
-
-
-

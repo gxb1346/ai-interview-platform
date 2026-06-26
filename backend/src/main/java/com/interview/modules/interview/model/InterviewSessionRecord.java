@@ -8,7 +8,14 @@ import java.time.LocalDateTime;
  * 与 Redis 双写，确保数据不丢失，支持历史数据分析和报表
  */
 @Entity
-@Table(name = "interview_session_records")
+@Table(name = "interview_session_records", indexes = {
+    @Index(name = "idx_session_id", columnList = "session_id"),
+    @Index(name = "idx_candidate_id", columnList = "candidate_id"),
+    @Index(name = "idx_status", columnList = "status"),
+    @Index(name = "idx_created_at", columnList = "created_at"),
+    @Index(name = "idx_composite_search", columnList = "candidate_id, status, created_at"),
+    @Index(name = "idx_composite_dashboard", columnList = "status, verdict, created_at")
+})
 public class InterviewSessionRecord {
 
     @Id

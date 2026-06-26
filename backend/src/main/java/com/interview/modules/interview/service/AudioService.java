@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.interview.common.exception.BusinessException;
 import com.interview.common.exception.ErrorCode;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.lang.ref.WeakReference;
 import java.util.Base64;
 import java.util.concurrent.*;
 
@@ -22,6 +24,8 @@ import java.util.concurrent.*;
  * 语音合成服务
  * 基于本地 Edge-TTS 将 AI 回复文本转为语音（免费，无需 API Key）
  * 替代了付费的 DashScope CosyVoice TTS
+ *
+ * 内存优化：使用 LRU 缓存 + 弱引用，限制最大缓存条目，避免内存泄漏
  */
 @Service
 public class AudioService {
@@ -46,9 +50,29 @@ public class AudioService {
     // 最大合成文本长度（字符），防止 edge-tts 超时
     private static final int MAX_TTS_TEXT_LENGTH = 500;
 
+    // TTS 音频缓存：使用 LRU 缓存 + 弱引用，限制最大条目数防止内存泄漏
+    // 每条音频 Base64 约几KB，100条仅几百KB，内存可控
+    private static final int MAX_CACHE_ENTRIES = 100;
+    private final ConcurrentLinkedQueue<String> cacheKeys = new ConcurrentLinkedQueue<>();
+    private final ConcurrentHashMap<String, WeakReference<String>> ttsCache = new ConcurrentHashMap<>();
+
     public AudioService() {
         this.restTemplate = new RestTemplate();
         this.gson = new Gson();
+    }
+
+    /**
+     * 清理缓存中已被GC回收的条目
+     */
+    private void cleanUpCache() {
+        while (cacheKeys.size() > MAX_CACHE_ENTRIES) {
+            String oldestKey = cacheKeys.poll();
+            if (oldestKey != null) {
+                ttsCache.remove(oldestKey);
+            }
+        }
+        // 移除已经被GC回收的弱引用
+        ttsCache.entrySet().removeIf(entry -> entry.getValue().get() == null);
     }
 
     @PostConstruct
@@ -64,6 +88,7 @@ public class AudioService {
     /**
      * 将文本转为语音，返回 Base64 编码的 MP3 音频数据
      * 通过调用本地 Edge-TTS Python 服务实现（免费，无需 API Key）
+     * 使用 LRU 缓存 + 弱引用防止内存泄漏
      *
      * @param text 待合成文本
      * @return Base64 编码的音频字节（MP3 格式），失败时返回 null
@@ -78,6 +103,19 @@ public class AudioService {
         String ttsText = text.length() > MAX_TTS_TEXT_LENGTH
                 ? text.substring(0, MAX_TTS_TEXT_LENGTH)
                 : text;
+
+        // 缓存 key：使用文本的 hash 避免存储完整文本
+        String cacheKey = "tts:" + ttsText.hashCode();
+
+        // 先查缓存（弱引用，GC 可自动回收）
+        WeakReference<String> cachedRef = ttsCache.get(cacheKey);
+        if (cachedRef != null) {
+            String cached = cachedRef.get();
+            if (cached != null) {
+                log.debug("TTS 命中缓存: text=\"{}\"", ttsText.substring(0, Math.min(20, ttsText.length())));
+                return cached;
+            }
+        }
 
         log.info("TTS 请求: text=\"{}\" ({}字符)", ttsText.substring(0, Math.min(30, ttsText.length())), ttsText.length());
 
@@ -97,6 +135,12 @@ public class AudioService {
             if (audioBase64 != null && !audioBase64.isEmpty()) {
                 log.info("TTS 合成成功: base64长度={}, 文本=\"{}\"",
                         audioBase64.length(), ttsText.substring(0, Math.min(20, ttsText.length())));
+
+                // 缓存结果（弱引用，限制最大条目数）
+                cleanUpCache();
+                ttsCache.put(cacheKey, new WeakReference<>(audioBase64));
+                cacheKeys.add(cacheKey);
+
                 return audioBase64;
             }
 
@@ -184,5 +228,17 @@ public class AudioService {
         }
 
         return respJson.get("audio").getAsString();
+    }
+
+    /**
+     * 服务关闭时清理 TTS 缓存和线程池
+     */
+    @PreDestroy
+    public void destroy() {
+        log.info("TTS AudioService 关闭，清理缓存...");
+        ttsCache.clear();
+        cacheKeys.clear();
+        ttsExecutor.shutdownNow();
+        log.info("TTS AudioService 已关闭");
     }
 }

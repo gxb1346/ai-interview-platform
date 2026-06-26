@@ -12,7 +12,7 @@ app.use(express.json({ limit: "10mb" }));
 
 // Qwen API configuration (DashScope OpenAI-compatible)
 const AI_API_KEY = process.env.AI_API_KEY || "";
-const AI_MODEL = process.env.AI_MODEL || "qwen-turbo";
+const AI_MODEL = process.env.AI_MODEL || "qwen3.5-flash";
 const AI_BASE_URL = process.env.AI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
 
 async function callQwen(messages: { role: string; content: string }[], options?: {

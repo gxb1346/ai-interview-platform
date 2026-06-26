@@ -1,15 +1,24 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Send, Loader2, BookOpen, CheckSquare, Square,
-  Sparkles, ArrowLeft, FileText
+  Sparkles, ArrowLeft, FileText, ChevronDown, ChevronUp, ExternalLink
 } from "lucide-react";
 import { KnowledgeDocument } from "../types";
 
 const API_BASE = "http://localhost:8082";
 
+interface SourceInfo {
+  documentTitle: string;
+  fileName: string;
+  chunkContent: string;
+  score: number;
+  chunkIndex: number;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
+  sources?: SourceInfo[];
 }
 
 interface KnowledgeQAViewProps {
@@ -27,6 +36,7 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
   const [thinking, setThinking] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [showDocPanel, setShowDocPanel] = useState(true);
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
   const messageEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -64,6 +74,15 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
     setSelectAll(next.size === documents.filter(d => d.indexStatus === "INDEXED").length);
   };
 
+  // 切换引用来源展开
+  const toggleSourceExpand = (key: string) => {
+    setExpandedSources(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
   // 发送问题
   const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -77,55 +96,76 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
 
     let fullAnswer = "";
     let receivedDone = false;
+    let sources: SourceInfo[] = [];
+
+    // 构建对话历史（最近6轮）
+    const history = messages
+      .filter(m => m.role === "user" || m.role === "assistant")
+      .slice(-12) // 最多6轮 = 12条消息
+      .map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
 
     try {
-      console.log("[KnowledgeQA] 开始 SSE 请求...");
-      // 使用 fetch + ReadableStream 手动解析 SSE 流（SSE 端点已在后端放行）
-      const docParam = selectedIds.size > 0
-        ? `&documentIds=${Array.from(selectedIds).join(",")}`
-        : "";
-      const url = `${API_BASE}/api/knowledge/qa/stream?question=${encodeURIComponent(userMsg.content)}${docParam}`;
-      console.log("[KnowledgeQA] URL:", url);
+      const body: Record<string, unknown> = {
+        question: userMsg.content,
+      };
+      if (selectedIds.size > 0) {
+        body.documentIds = Array.from(selectedIds);
+      }
+      if (history.length > 0) {
+        body.history = history;
+      }
+      const url = `${API_BASE}/api/knowledge/qa/stream`;
 
-      const response = await fetch(url);
-      console.log("[KnowledgeQA] 响应状态:", response.status);
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       if (!response.ok) throw new Error(`SSE 连接失败 (${response.status})`);
 
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
 
+      // SSE 事件上下文（跨 chunk 保持状态，解决 event:/data: 行被拆散的问题）
+      let sseEventType = "";
+      let sseData = "";
+
       const processLines = (lines: string[]) => {
-        let eventType = "";
-        let data = "";
         for (const line of lines) {
           if (line.startsWith("event:")) {
-            eventType = line.slice(6).trim();
+            sseEventType = line.slice(6).trim();
           } else if (line.startsWith("data:")) {
-            data = line.slice(5).trim();
+            sseData += line.slice(5);  // 拼接多行 data（trim 放在最后）
           } else if (line === "") {
-            if (eventType === "token") {
-              fullAnswer += data;
+            if (sseEventType === "token") {
+              fullAnswer += sseData;
               setStreamingText(fullAnswer);
-            } else if (eventType === "done") {
+            } else if (sseEventType === "sources") {
+              try {
+                sources = JSON.parse(sseData.trim());
+              } catch (e) {
+                console.warn("解析 sources 失败:", e);
+              }
+            } else if (sseEventType === "done") {
               receivedDone = true;
-              setMessages(prev => [...prev, { role: "assistant", content: fullAnswer }]);
+              setMessages(prev => [...prev, { role: "assistant", content: fullAnswer, sources }]);
               setStreamingText("");
               setThinking(false);
-            } else if (eventType === "error") {
+            } else if (sseEventType === "error") {
               if (fullAnswer) {
-                setMessages(prev => [...prev, { role: "assistant", content: fullAnswer }]);
+                setMessages(prev => [...prev, { role: "assistant", content: fullAnswer, sources }]);
               } else {
                 setMessages(prev => [...prev, {
                   role: "assistant",
-                  content: "抱歉，AI 回答时出现错误，请稍后重试。"
+                  content: "抱歉，AI 回答时出现错误，请稍后重试。",
                 }]);
               }
               setStreamingText("");
               setThinking(false);
             }
-            eventType = "";
-            data = "";
+            sseEventType = "";
+            sseData = "";
           }
         }
       };
@@ -134,7 +174,7 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
       abortRef.current.signal.addEventListener("abort", () => {
         reader.cancel();
         if (fullAnswer) {
-          setMessages(prev => [...prev, { role: "assistant", content: fullAnswer }]);
+          setMessages(prev => [...prev, { role: "assistant", content: fullAnswer, sources }]);
         }
         setStreamingText("");
         setThinking(false);
@@ -145,7 +185,7 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
         if (done) {
           if (buffer.trim()) processLines(buffer.split("\n"));
           if (!receivedDone && fullAnswer) {
-            setMessages(prev => [...prev, { role: "assistant", content: fullAnswer }]);
+            setMessages(prev => [...prev, { role: "assistant", content: fullAnswer, sources }]);
             setStreamingText("");
             setThinking(false);
           }
@@ -162,7 +202,7 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
       if (!receivedDone) {
         setMessages(prev => [...prev, {
           role: "assistant",
-          content: fullAnswer || `SSE 连接失败: ${err instanceof Error ? err.message : err}`
+          content: fullAnswer || `SSE 连接失败: ${err instanceof Error ? err.message : ""}`,
         }]);
       }
       setStreamingText("");
@@ -177,9 +217,71 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
       { role: "assistant", content: "你好！我是基于知识库的智能问答助手。请在上方选择一个或多个文档，然后开始提问。" }
     ]);
     setStreamingText("");
+    setExpandedSources(new Set());
   };
 
   const indexedDocs = documents.filter(d => d.indexStatus === "INDEXED");
+
+  // 渲染引用来源卡片
+  const renderSources = (sources: SourceInfo[] | undefined, msgIndex: number) => {
+    if (!sources || sources.length === 0) return null;
+
+    // 按文档去重，每个文档只显示最高分的分块
+    const uniqueSources = sources.reduce((acc, s) => {
+      const key = s.documentTitle;
+      if (!acc.has(key) || (acc.get(key)!.score < s.score)) {
+        acc.set(key, s);
+      }
+      return acc;
+    }, new Map<string, SourceInfo>());
+
+    return (
+      <div className="mt-3 pt-3 border-t border-slate-100">
+        <div className="text-[10px] font-semibold text-slate-500 mb-2 flex items-center gap-1">
+          <BookOpen className="w-3 h-3" /> 引用来源（{uniqueSources.size} 个文档）
+        </div>
+        <div className="space-y-1.5">
+          {Array.from(uniqueSources.values()).map((source, idx) => {
+            const expandKey = `${msgIndex}-${idx}`;
+            const isExpanded = expandedSources.has(expandKey);
+            const scorePercent = Math.round(source.score * 100);
+
+            return (
+              <div key={idx} className="bg-slate-50 rounded-lg overflow-hidden border border-slate-100">
+                <button
+                  onClick={() => toggleSourceExpand(expandKey)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-[10px] hover:bg-slate-100 transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <FileText className="w-3 h-3 text-primary shrink-0" />
+                    <span className="font-semibold text-slate-700 truncate">{source.documentTitle}</span>
+                    <span className="text-slate-400 shrink-0">#{source.chunkIndex}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
+                      scorePercent >= 85 ? "bg-emerald-100 text-emerald-700" :
+                      scorePercent >= 70 ? "bg-amber-100 text-amber-700" :
+                      "bg-red-100 text-red-700"
+                    }`}>
+                      {scorePercent}%
+                    </span>
+                    {isExpanded ? <ChevronUp className="w-3 h-3 text-slate-400" /> : <ChevronDown className="w-3 h-3 text-slate-400" />}
+                  </div>
+                </button>
+                {isExpanded && (
+                  <div className="px-3 pb-2">
+                    <div className="text-[10px] text-slate-600 leading-relaxed bg-white rounded-lg p-2 border border-slate-100 max-h-32 overflow-y-auto whitespace-pre-wrap">
+                      {source.chunkContent}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col h-[calc(100vh-10rem)]">
@@ -264,7 +366,9 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
                 ${msg.role === "user"
                   ? "bg-primary text-white rounded-tr-none"
                   : "bg-white text-slate-700 border border-slate-100 rounded-tl-none"}`}>
-                {msg.content}
+                <div className="whitespace-pre-wrap">{msg.content}</div>
+                {/* 引用来源卡片 */}
+                {msg.role === "assistant" && renderSources(msg.sources, i)}
               </div>
             </div>
           ))}
@@ -274,7 +378,7 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
             <div className="flex items-start gap-3.5">
               <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center shrink-0 text-xs font-bold text-emerald-600">AI</div>
               <div className="max-w-[75%] text-xs leading-relaxed p-3.5 rounded-2xl bg-white text-slate-700 border border-slate-100 rounded-tl-none shadow-sm">
-                {streamingText}
+                <div className="whitespace-pre-wrap">{streamingText}</div>
                 <span className="inline-block w-1.5 h-4 bg-primary ml-0.5 animate-pulse" />
               </div>
             </div>
@@ -299,7 +403,7 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
             <input type="text" value={inputText}
               onChange={e => setInputText(e.target.value)}
               disabled={thinking}
-              placeholder={thinking ? "AI 正在回答..." : "输入您的问题..."}
+              placeholder={thinking ? "AI 正在回答..." : "输入您的问题...（支持多轮追问）"}
               className="flex-1 text-xs py-3 px-4 bg-slate-50 rounded-xl border border-slate-200 focus:border-primary outline-none transition" />
             <button type="submit" disabled={thinking || !inputText.trim()}
               className="w-10 h-10 bg-primary hover:bg-primary-container disabled:bg-slate-300 rounded-xl flex items-center justify-center text-white transition shrink-0 cursor-pointer">
@@ -307,7 +411,8 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
             </button>
           </form>
           <p className="text-[10px] text-slate-400 mt-2 text-center">
-            基于 RAG 检索增强生成 · {selectedIds.size > 0 ? `限定 ${selectedIds.size} 个文档` : "搜索全部知识库"}
+            基于 RAG 检索增强生成 · 支持多轮追问 · 答案可追溯来源
+            {selectedIds.size > 0 && ` · 限定 ${selectedIds.size} 个文档`}
           </p>
         </div>
       </div>

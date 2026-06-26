@@ -4,7 +4,7 @@ import {
   Trash2, CheckSquare, Square, AlertTriangle, Star, Award, Trophy
 } from "lucide-react";
 import { interviewApi, authFetch } from "../api";
-import type { SessionRecord, SpringPage } from "../types";
+import type { SessionRecord, SpringPage, SessionDetail } from "../types";
 
 const API_BASE = "http://localhost:8082";
 const PAGE_SIZE = 9;
@@ -20,7 +20,8 @@ export default function InterviewRecordsView() {
   const [page, setPage] = useState(0);
 
   // 详情弹窗
-  const [activeRecord, setActiveRecord] = useState<SessionRecord | null>(null);
+  const [activeRecord, setActiveRecord] = useState<SessionDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   // 批量删除
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -106,6 +107,21 @@ export default function InterviewRecordsView() {
       fetchRecords();
     } catch (err) {
       console.error("删除失败:", err);
+    }
+  };
+
+  // 打开详情弹窗（调用API获取完整评估报告）
+  const handleOpenDetail = async (record: SessionRecord) => {
+    setDetailLoading(true);
+    try {
+      const detail = await interviewApi.getSession(record.sessionId);
+      setActiveRecord(detail);
+    } catch (err) {
+      console.error("获取面试详情失败:", err);
+      // 降级：使用列表数据展示基本详情
+      setActiveRecord(record as any);
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -223,6 +239,7 @@ export default function InterviewRecordsView() {
               <div
                 key={record.sessionId}
                 className="bg-white/80 hover:bg-white backdrop-blur-md p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between hover:scale-[1.01] duration-200 relative"
+                onClick={() => handleOpenDetail(record)}
               >
                 <button
                   onClick={e => { e.stopPropagation(); toggleSelect(record.sessionId); }}
@@ -234,7 +251,7 @@ export default function InterviewRecordsView() {
                   }
                 </button>
 
-                <div className="space-y-4" onClick={() => setActiveRecord(record)}>
+                <div className="space-y-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
@@ -319,7 +336,7 @@ export default function InterviewRecordsView() {
       {/* 详情弹窗 */}
       {activeRecord && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-6 sm:p-8 space-y-5 border border-slate-150 shadow-2xl relative overflow-y-auto max-h-[90vh]">
+          <div className="bg-white w-full max-w-2xl rounded-3xl p-6 sm:p-8 space-y-5 border border-slate-150 shadow-2xl relative overflow-y-auto max-h-[90vh]">
             <button
               onClick={() => setActiveRecord(null)}
               className="absolute right-6 top-6 w-8 h-8 rounded-full border border-slate-100 flex items-center justify-center hover:bg-slate-50 cursor-pointer"
@@ -327,75 +344,159 @@ export default function InterviewRecordsView() {
               <X className="w-4 h-4 text-slate-400" />
             </button>
 
-            <div className="border-b border-slate-100 pb-4 space-y-2.5">
-              <div className="flex items-center gap-2">
-                <Trophy className="w-6 h-6 text-primary" />
-                <h2 className="text-base font-bold text-slate-800">面试记录详情</h2>
+            {detailLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 text-primary animate-spin" />
               </div>
-              <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-500">
-                <span>候选人: <strong className="text-slate-800">{activeRecord.candidateName || "-"}</strong></span>
-                <span>方向: <strong className="text-slate-800">{activeRecord.direction}</strong></span>
-                <span>等级: <strong className="text-slate-800">{activeRecord.level}</strong></span>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="border-b border-slate-100 pb-4 space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <Trophy className="w-6 h-6 text-primary" />
+                    <h2 className="text-base font-bold text-slate-800">面试记录详情</h2>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-500">
+                    <span>候选人: <strong className="text-slate-800">{activeRecord.candidateName || "-"}</strong></span>
+                    <span>方向: <strong className="text-slate-800">{activeRecord.direction}</strong></span>
+                    <span>等级: <strong className="text-slate-800">{activeRecord.level}</strong></span>
+                  </div>
+                </div>
 
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div className="bg-slate-50 p-3 rounded-xl">
-                <span className="text-[10px] uppercase text-slate-400 block">状态</span>
-                <span className={`text-xs font-bold border rounded-full px-2 py-0.5 mt-1 inline-block ${statusStyles[activeRecord.status] || ""}`}>
-                  {statusLabels[activeRecord.status] || activeRecord.status}
-                </span>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-xl">
-                <span className="text-[10px] uppercase text-slate-400 block">面试模式</span>
-                <span className="text-xs font-bold text-slate-700">{activeRecord.mode === "voice" ? "语音面试" : "文本面试"}</span>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-xl">
-                <span className="text-[10px] uppercase text-slate-400 block">总轮次</span>
-                <span className="text-xs font-bold text-slate-700">{activeRecord.totalRounds}</span>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-xl">
-                <span className="text-[10px] uppercase text-slate-400 block">综合评分</span>
-                <span className="text-xs font-bold text-primary">{activeRecord.overallScore || "-"}</span>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-xl">
-                <span className="text-[10px] uppercase text-slate-400 block">创建时间</span>
-                <span className="text-xs font-bold text-slate-700">{activeRecord.createdAt?.slice(0, 16) || "-"}</span>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-xl">
-                <span className="text-[10px] uppercase text-slate-400 block">完成时间</span>
-                <span className="text-xs font-bold text-slate-700">{activeRecord.completedAt?.slice(0, 16) || "未完成"}</span>
-              </div>
-            </div>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="bg-slate-50 p-3 rounded-xl">
+                    <span className="text-[10px] uppercase text-slate-400 block">状态</span>
+                    <span className={`text-xs font-bold border rounded-full px-2 py-0.5 mt-1 inline-block ${statusStyles[activeRecord.status] || ""}`}>
+                      {statusLabels[activeRecord.status] || activeRecord.status}
+                    </span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-xl">
+                    <span className="text-[10px] uppercase text-slate-400 block">面试模式</span>
+                    <span className="text-xs font-bold text-slate-700">{activeRecord.mode === "voice" ? "语音面试" : "文本面试"}</span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-xl">
+                    <span className="text-[10px] uppercase text-slate-400 block">总轮次</span>
+                    <span className="text-xs font-bold text-slate-700">{activeRecord.currentRound}</span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-xl">
+                    <span className="text-[10px] uppercase text-slate-400 block">综合评分</span>
+                    <span className="text-xs font-bold text-primary">
+                      {activeRecord.evaluationReport?.overallScore ?? "-"}
+                    </span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-xl">
+                    <span className="text-[10px] uppercase text-slate-400 block">创建时间</span>
+                    <span className="text-xs font-bold text-slate-700">{activeRecord.createdAt?.slice(0, 16) || "-"}</span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-xl">
+                    <span className="text-[10px] uppercase text-slate-400 block">完成时间</span>
+                    <span className="text-xs font-bold text-slate-700">{activeRecord.completedAt?.slice(0, 16) || "未完成"}</span>
+                  </div>
+                </div>
 
-            {activeRecord.verdict && (
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                <span className="text-[10px] uppercase text-slate-400 block mb-1">面试结论</span>
-                <span className={`text-xs font-bold border rounded-full px-3 py-1 ${getVerdictStyle(activeRecord.verdict)}`}>
-                  {activeRecord.verdict}
-                </span>
-              </div>
+                {activeRecord.evaluationReport?.verdict && (
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <span className="text-[10px] uppercase text-slate-400 block mb-1">面试结论</span>
+                    <span className={`text-xs font-bold border rounded-full px-3 py-1 ${getVerdictStyle(activeRecord.evaluationReport.verdict)}`}>
+                      {activeRecord.evaluationReport.verdict}
+                    </span>
+                  </div>
+                )}
+
+                {/* AI 评估报告 */}
+                {activeRecord.evaluationReport && (
+                  <div className="space-y-4 border-t border-slate-100 pt-4">
+                    <div className="flex items-center gap-2">
+                      <Award className="w-5 h-5 text-amber-500" />
+                      <h3 className="text-sm font-bold text-slate-800">AI 评估报告</h3>
+                    </div>
+
+                    {/* 维度评分 */}
+                    {activeRecord.evaluationReport.dimensionScores && Object.keys(activeRecord.evaluationReport.dimensionScores).length > 0 && (
+                      <div className="grid grid-cols-2 gap-3">
+                        {Object.entries(activeRecord.evaluationReport.dimensionScores).map(([key, score]) => (
+                          <div key={key} className="bg-slate-50 p-3 rounded-xl">
+                            <span className="text-[10px] uppercase text-slate-400 block">
+                              {{ technical: "技术深度", communication: "沟通表达", problemSolving: "问题解决", culturalFit: "综合素质" }[key] || key}
+                            </span>
+                            <div className="flex items-center gap-2 mt-1">
+                              <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-primary rounded-full transition-all"
+                                  style={{ width: `${(score / 10) * 100}%` }}
+                                />
+                              </div>
+                              <span className="text-xs font-bold text-primary">{score}/10</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* AI 总结 */}
+                    {activeRecord.evaluationReport.summary && (
+                      <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4">
+                        <span className="text-[10px] uppercase text-blue-500 font-bold block mb-2">AI 评估总结</span>
+                        <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">
+                          {activeRecord.evaluationReport.summary}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* 优势 */}
+                    {activeRecord.evaluationReport.strengths && activeRecord.evaluationReport.strengths.length > 0 && (
+                      <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-4">
+                        <span className="text-[10px] uppercase text-emerald-600 font-bold block mb-2 flex items-center gap-1">
+                          <Star className="w-3.5 h-3.5" /> 优势亮点
+                        </span>
+                        <ul className="space-y-1.5">
+                          {activeRecord.evaluationReport.strengths.map((s, i) => (
+                            <li key={i} className="text-xs text-slate-700 flex items-start gap-1.5">
+                              <span className="text-emerald-500 mt-0.5">•</span>
+                              {s}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* 待改进项 */}
+                    {activeRecord.evaluationReport.improvements && activeRecord.evaluationReport.improvements.length > 0 && (
+                      <div className="bg-amber-50/50 border border-amber-100 rounded-xl p-4">
+                        <span className="text-[10px] uppercase text-amber-600 font-bold block mb-2">待改进项</span>
+                        <ul className="space-y-1.5">
+                          {activeRecord.evaluationReport.improvements.map((item, i) => (
+                            <li key={i} className="text-xs text-slate-700 flex items-start gap-1.5">
+                              <span className="text-amber-500 mt-0.5">•</span>
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="border-t border-slate-100 pt-4 flex items-center justify-between">
+                  <button
+                    onClick={() => {
+                      if (window.confirm("确定删除该面试记录？")) {
+                        handleDeleteOne(activeRecord.sessionId);
+                      }
+                    }}
+                    className="text-xs bg-red-50 text-red-600 hover:bg-red-100 font-semibold py-2 px-4 rounded-lg transition border border-red-200 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    删除记录
+                  </button>
+                  <button
+                    onClick={() => setActiveRecord(null)}
+                    className="text-xs bg-primary/10 text-primary font-bold hover:bg-primary/20 py-2 px-5 rounded-lg transition shadow-sm border border-primary cursor-pointer"
+                  >
+                    关闭
+                  </button>
+                </div>
+              </>
             )}
-
-            <div className="border-t border-slate-100 pt-4 flex items-center justify-between">
-              <button
-                onClick={() => {
-                  if (window.confirm("确定删除该面试记录？")) {
-                    handleDeleteOne(activeRecord.sessionId);
-                  }
-                }}
-                className="text-xs bg-red-50 text-red-600 hover:bg-red-100 font-semibold py-2 px-4 rounded-lg transition border border-red-200 cursor-pointer flex items-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                删除记录
-              </button>
-              <button
-                onClick={() => setActiveRecord(null)}
-                className="text-xs bg-primary/10 text-primary font-bold hover:bg-primary/20 py-2 px-5 rounded-lg transition shadow-sm border border-primary cursor-pointer"
-              >
-                关闭
-              </button>
-            </div>
           </div>
         </div>
       )}

@@ -54,6 +54,9 @@ public class InterviewSession implements Serializable {
     /** 待返回的评分简要反馈 */
     private String lastScoreFeedback;
 
+    /** 评估报告（面试结束后由评估引擎生成） */
+    private com.interview.modules.evaluation.model.EvaluationReport evaluationReport;
+
     /** 时间戳 */
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -151,7 +154,11 @@ public class InterviewSession implements Serializable {
     // Helper methods
     public void addMessage(InterviewMessage message) {
         this.messages.add(message);
-        this.currentRound++;
+        // 轮次只按候选人回答计数，一轮 = 一次候选人回答
+        // 面试官提问不增加轮次计数
+        if ("candidate".equals(message.getSender())) {
+            this.currentRound++;
+        }
         this.updatedAt = LocalDateTime.now();
     }
 
@@ -197,4 +204,7 @@ public class InterviewSession implements Serializable {
 
     public String getLastScoreFeedback() { return lastScoreFeedback; }
     public void setLastScoreFeedback(String lastScoreFeedback) { this.lastScoreFeedback = lastScoreFeedback; }
+
+    public com.interview.modules.evaluation.model.EvaluationReport getEvaluationReport() { return evaluationReport; }
+    public void setEvaluationReport(com.interview.modules.evaluation.model.EvaluationReport evaluationReport) { this.evaluationReport = evaluationReport; }
 }

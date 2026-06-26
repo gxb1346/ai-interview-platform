@@ -1,5 +1,6 @@
 server:
   port: 8082
+  max-http-request-header-size: 32KB
 
 spring:
   application:
@@ -22,15 +23,26 @@ spring:
     username: postgres
     password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 300000
+      max-lifetime: 600000
+      connection-timeout: 10000
+      leak-detection-threshold: 60000
   
   # JPA配置
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc.batch_size: 20
+        jdbc.fetch_size: 50
+        order_inserts: true
+        order_updates: true
   
   # # OpenAI Configuration
   # ai:
@@ -39,7 +51,7 @@ spring:
   #     base-url: https://dashscope.aliyuncs.com/compatible-mode
   #     chat:
   #       options:
-  #         model: qwen-turbo
+  #         model: qwen3.5-flash
 
   # Spring AI配置
   ai:
@@ -48,7 +60,7 @@ spring:
       api-key: ${AI_API_KEY}
       chat:
         options:
-          model: ${AI_MODEL:qwen-turbo}
+          model: ${AI_MODEL:qwen3.5-flash}
       embedding:
         options:
           model: text-embedding-v3
@@ -63,9 +75,18 @@ spring:
       connect-timeout: 10000ms
       lettuce:
         pool:
-          enabled: false
+          enabled: true
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
+          max-wait: -1ms
 
-  # 使用 Lettuce 客户端（已移除 Redisson 依赖）
+  # Redis 缓存配置
+  cache:
+    type: redis
+    redis:
+      time-to-live: 300000
+      cache-null-values: false
 
   # pgvector配置
   vectorstore:

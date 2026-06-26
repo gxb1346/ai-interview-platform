@@ -83,13 +83,13 @@ public class DocumentProcessService {
         doc.setContentHash(contentHash);
         doc.setIndexStatus("PENDING");
         doc.setChunkCount(0);
-        KnowledgeDocument saved = documentRepository.save(doc);
-
         // 1. Tika 解析文档为纯文本（同步完成，速度较快）
         String rawText = tikaService.extractText(file);
         if (rawText == null || rawText.isBlank()) {
             throw new BusinessException(ErrorCode.DOCUMENT_PARSE_FAILED, "文档内容为空（文件可能为扫描件图片，无法提取文字）");
         }
+        doc.setRawText(rawText);  // 保存原始文本用于重新索引
+        KnowledgeDocument saved = documentRepository.save(doc);
 
         // 2. 通过 Redis Stream 异步执行向量化（分块 → Embedding → 写入 pgvector）
         Map<String, Object> payload = new HashMap<>();
@@ -121,6 +121,43 @@ public class DocumentProcessService {
         }
 
         documentRepository.delete(doc);
+    }
+
+    /**
+     * 重新索引文档（适用于失败文档或使用新分块参数重新索引）
+     */
+    @Transactional
+    public void reindexDocument(Long docId) {
+        KnowledgeDocument doc = documentRepository.findById(docId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND, "文档不存在: id=" + docId));
+
+        if (doc.getRawText() == null || doc.getRawText().isBlank()) {
+            throw new BusinessException(ErrorCode.DOCUMENT_PARSE_FAILED,
+                    "旧版本文档不支持重新索引，请重新上传。原因：缺少原始文本(rawText)");
+        }
+
+        // 1. 删除旧向量数据
+        try {
+            documentRepository.deleteVectorByDocumentId(String.valueOf(docId));
+            log.info("已删除文档 {} 的旧向量数据", docId);
+        } catch (Exception e) {
+            log.error("删除旧向量数据失败: {}", e.getMessage());
+        }
+
+        // 2. 更新状态为待处理
+        doc.setIndexStatus("PENDING");
+        doc.setErrorMessage(null);
+        documentRepository.save(doc);
+
+        // 3. 重新提交索引任务
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("documentId", doc.getId());
+        payload.put("rawText", doc.getRawText());
+        payload.put("fileName", doc.getFileName());
+        payload.put("title", doc.getTitle());
+        taskProducer.sendTask(TaskType.DOCUMENT_INDEX, payload);
+
+        log.info("重新索引任务已发送: documentId={}", docId);
     }
 
     /**

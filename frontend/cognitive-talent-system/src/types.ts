@@ -353,6 +353,28 @@ export interface SessionRecord {
   completedAt: string | null;
 }
 
+/** 面试会话详情（含评估报告） */
+export interface SessionDetail {
+  sessionId: string;
+  candidateId: string;
+  candidateName: string;
+  direction: string;
+  level: string;
+  mode: string;
+  status: string;
+  currentRound: number;          // 当前总轮数（后端字段名）
+  createdAt: string;
+  completedAt: string | null;
+  evaluationReport: {
+    summary: string;
+    strengths: string[];
+    improvements: string[];
+    dimensionScores: Record<string, number>;
+    verdict: string;
+    overallScore: number;
+  } | null;
+}
+
 /** 后端分页返回（Spring Data Page） */
 export interface SpringPage<T> {
   content: T[];

@@ -96,6 +96,24 @@ public class InterviewSessionRepository {
     }
 
     /**
+     * 更新面试会话的评分到 PostgreSQL（面试结束后由评估引擎调用）
+     */
+    @Transactional
+    public void updateScoreToPg(String sessionId, int overallScore, String verdict) {
+        try {
+            pgRepository.findById(sessionId).ifPresent(record -> {
+                record.setOverallScore(overallScore);
+                record.setVerdict(verdict);
+                record.setUpdatedAt(LocalDateTime.now());
+                pgRepository.save(record);
+                log.info("评分已写入 PostgreSQL: sessionId={}, overallScore={}, verdict={}", sessionId, overallScore, verdict);
+            });
+        } catch (Exception e) {
+            log.error("评分写入 PostgreSQL 失败: sessionId={}", sessionId, e);
+        }
+    }
+
+    /**
      * 根据 sessionId 查询会话
      */
     public Optional<InterviewSession> findById(String sessionId) {

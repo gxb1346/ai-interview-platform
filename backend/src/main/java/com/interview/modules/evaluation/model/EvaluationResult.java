@@ -12,6 +12,7 @@ public class EvaluationResult {
     private int batchIndex;             // 第几批
     private int roundStart;
     private int roundEnd;
+    private String stage;               // 所属面试阶段
     private int batchScore;             // 该批次评分
     private List<String> batchStrengths;
     private List<String> batchWeaknesses;
@@ -32,6 +33,9 @@ public class EvaluationResult {
 
     public int getRoundEnd() { return roundEnd; }
     public void setRoundEnd(int roundEnd) { this.roundEnd = roundEnd; }
+
+    public String getStage() { return stage; }
+    public void setStage(String stage) { this.stage = stage; }
 
     public int getBatchScore() { return batchScore; }
     public void setBatchScore(int batchScore) { this.batchScore = batchScore; }

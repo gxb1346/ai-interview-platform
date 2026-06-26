@@ -3,7 +3,7 @@
  * 统一管理 JWT Token、自动刷新、后端 API 调用
  */
 
-import type { DashboardStats, SessionSearchParams, SpringPage, SessionRecord, UserProfile, TokenRefreshResponse } from "./types";
+import type { DashboardStats, SessionSearchParams, SpringPage, SessionRecord, SessionDetail, UserProfile, TokenRefreshResponse } from "./types";
 
 const API_BASE = "http://localhost:8082";
 
@@ -198,4 +198,8 @@ export const interviewApi = {
     if (params.endTime) query.set("endTime", params.endTime);
     return apiFetch<SpringPage<SessionRecord>>(`/api/mock-interview/sessions/search?${query.toString()}`);
   },
+
+  /** 获取面试会话详情（含评估报告） */
+  getSession: (sessionId: string) =>
+    apiFetch<SessionDetail>(`/api/mock-interview/sessions/${sessionId}`),
 };

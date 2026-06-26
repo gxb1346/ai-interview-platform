@@ -334,7 +334,7 @@ export default function App() {
   const authUser = getStoredUser();
 
   return (
-    <div className="min-h-screen bg-[#F5F7FA] text-slate-800 flex flex-col font-sans selection:bg-primary/10 select-none">
+    <div className="min-h-screen bg-[#F5F7FA] text-slate-800 flex flex-col font-sans selection:bg-primary/10">
       {/* Absolute top grid wrapper */}
       <div className="flex flex-1 items-stretch overflow-hidden">
         
