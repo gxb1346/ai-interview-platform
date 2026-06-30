@@ -1,25 +1,60 @@
 package com.interview.common.result;
 
-import lombok.Data;
+import com.interview.common.constant.CommonConstants;
+import com.interview.common.exception.ErrorCode;
+import lombok.Getter;
 
-@Data
+/**
+ * 统一响应结果
+ */
+@Getter
 public class Result<T> {
-    private int code;
-    private String message;
-    private T data;
     
-    public static <T> Result<T> success(T data) {
-        Result<T> result = new Result<>();
-        result.setCode(200);
-        result.setMessage("success");
-        result.setData(data);
-        return result;
+    private final Integer code;
+    private final String message;
+    private final T data;
+    
+    private Result(Integer code, String message, T data) {
+        this.code = code;
+        this.message = message;
+        this.data = data;
     }
     
+    // ========== 成功响应 ==========
+    
+    public static <T> Result<T> success() {
+        return new Result<>(CommonConstants.StatusCode.SUCCESS, "success", null);
+    }
+    
+    public static <T> Result<T> success(T data) {
+        return new Result<>(CommonConstants.StatusCode.SUCCESS, "success", data);
+    }
+    
+    public static <T> Result<T> success(String message, T data) {
+        return new Result<>(CommonConstants.StatusCode.SUCCESS, message, data);
+    }
+    
+    // ========== 失败响应 ==========
+    
     public static <T> Result<T> error(String message) {
-        Result<T> result = new Result<>();
-        result.setCode(500);
-        result.setMessage(message);
-        return result;
+        return new Result<>(CommonConstants.StatusCode.SERVER_ERROR, message, null);
+    }
+    
+    public static <T> Result<T> error(Integer code, String message) {
+        return new Result<>(code, message, null);
+    }
+    
+    public static <T> Result<T> error(ErrorCode errorCode) {
+        return new Result<>(errorCode.getCode(), errorCode.getMessage(), null);
+    }
+    
+    public static <T> Result<T> error(ErrorCode errorCode, String message) {
+        return new Result<>(errorCode.getCode(), message, null);
+    }
+    
+    // ========== 辅助方法 ==========
+    
+    public boolean isSuccess() {
+        return CommonConstants.StatusCode.SUCCESS == this.code;
     }
 }
