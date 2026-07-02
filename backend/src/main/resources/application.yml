@@ -110,6 +110,37 @@ app:
     secret-key: ${STORAGE_SECRET_KEY:minioadmin}
     bucket: interview-guide
 
+  # AI Provider Configuration (LlmProviderProperties)
+  ai:
+    default-provider: dashscope
+    providers:
+      dashscope:
+        base-url: ${AI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+        api-key: ${AI_API_KEY}
+        model: ${AI_MODEL:qwen3.5-flash}
+        embedding-model: text-embedding-v3
+        embedding-dimensions: 1024
+        supports-embedding: true
+    security:
+      api-key-encryption-key: ${APP_AI_CONFIG_ENCRYPTION_KEY:}
+      require-encryption-key: false
+    agent:
+      skills-root: classpath:/skills
+    structured-max-attempts: 2
+    structured-include-last-error: true
+    structured-retry-use-repair-prompt: true
+    structured-retry-append-strict-json-instruction: true
+    structured-error-message-max-length: 200
+    structured-metrics-enabled: true
+
+  # 语音面试配置（DashScope ASR/TTS 实时语音服务的 API Key）
+  voice-interview:
+    qwen:
+      asr:
+        api-key: ${AI_API_KEY}
+      tts:
+        api-key: ${AI_API_KEY}
+
 # 本地 Edge-TTS 语音合成服务（免费替代付费的 DashScope CosyVoice TTS）
 # 无需启动 Docker 容器，也可通过 Python 直接运行:
 #   cd backend/src/main/python

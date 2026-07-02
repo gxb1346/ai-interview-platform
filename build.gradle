@@ -49,6 +49,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.apache.commons:commons-pool2'
 
+    // Redisson - Redis client with distributed lock, stream, cache
+    implementation libs.redisson.starter
+
     // PostgreSQL
     runtimeOnly 'org.postgresql:postgresql'
 
@@ -110,6 +113,7 @@ dependencies {
 
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
     testImplementation libs.junit.jupiter
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

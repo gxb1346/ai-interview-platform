@@ -4,7 +4,8 @@ import {
   Trash2, CheckSquare, Square, AlertTriangle, Star, Award, Trophy
 } from "lucide-react";
 import { interviewApi, authFetch } from "../api";
-import type { SessionRecord, SpringPage, SessionDetail } from "../types";
+import { voiceInterviewApi } from "../api/voiceInterview";
+import type { SessionRecord, SpringPage, SessionDetail, VoiceSessionMeta, VoiceEvaluationDetail } from "../types";
 
 const API_BASE = "http://localhost:8082";
 const PAGE_SIZE = 9;
@@ -18,6 +19,14 @@ export default function InterviewRecordsView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [page, setPage] = useState(0);
+
+  // 面试类型：模拟面试 / 语音面试
+  const [interviewType, setInterviewType] = useState<"mock" | "voice">("mock");
+
+  // 语音面试记录
+  const [voiceRecords, setVoiceRecords] = useState<SessionRecord[]>([]);
+  const [voiceLoading, setVoiceLoading] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
 
   // 详情弹窗
   const [activeRecord, setActiveRecord] = useState<SessionDetail | null>(null);
@@ -48,6 +57,46 @@ export default function InterviewRecordsView() {
   }, [page, searchTerm, statusFilter]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
+
+  // 语音面试记录获取
+  const fetchVoiceRecords = useCallback(async () => {
+    setVoiceLoading(true);
+    setVoiceError("");
+    try {
+      const result = await voiceInterviewApi.getSessions(undefined, statusFilter || undefined);
+      const data = result?.data ?? result;
+      const list = Array.isArray(data) ? (data as VoiceSessionMeta[]) : [];
+      // 映射为 SessionRecord 格式
+      const mapped: SessionRecord[] = list.map((v) => ({
+        sessionId: `voice-${v.sessionId ?? v.id}`,
+        candidateId: v.userId,
+        candidateName: v.candidateName || (v.userId && v.userId !== "default" ? `用户${v.userId}` : "未命名候选人"),
+        direction: v.skillId,
+        level: v.roleType,
+        mode: "voice",
+        status: v.status,
+        totalRounds: v.messageCount ?? 0,
+        overallScore: v.overallScore ?? 0,
+        verdict: v.overallScore != null ? (v.overallScore >= 80 ? "推荐录用" : v.overallScore >= 60 ? "待定" : "不推荐") : "",
+        createdAt: v.createdAt,
+        updatedAt: v.updatedAt ?? v.createdAt,
+        completedAt: v.status === "COMPLETED" ? v.updatedAt ?? v.createdAt : null,
+      }));
+      // 按创建时间倒序
+      mapped.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setVoiceRecords(mapped);
+    } catch (err: any) {
+      setVoiceError(err?.message || "加载语音面试记录失败");
+    } finally {
+      setVoiceLoading(false);
+    }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    if (interviewType === "voice") {
+      fetchVoiceRecords();
+    }
+  }, [interviewType, fetchVoiceRecords]);
 
   const handleSearch = () => {
     setPage(0);
@@ -125,6 +174,59 @@ export default function InterviewRecordsView() {
     }
   };
 
+  // 打开语音面试详情弹窗
+  const handleVoiceDetail = async (record: SessionRecord) => {
+    setDetailLoading(true);
+    try {
+      const voiceId = record.sessionId.replace("voice-", "");
+      const result = await voiceInterviewApi.getSession(Number(voiceId));
+      const detail = result?.data ?? result;
+
+      // 尝试获取 AI 评估结果
+      let evaluationReport: SessionDetail["evaluationReport"] = null;
+      let voiceEvalDetail: VoiceEvaluationDetail | null = null;
+      try {
+        const evalResult = await voiceInterviewApi.getEvaluation(Number(voiceId));
+        const evalData = evalResult?.data ?? evalResult;
+        const evaluation = evalData?.evaluation;
+        if (evaluation) {
+          voiceEvalDetail = evaluation;
+          // 映射为 evaluationReport 格式
+          evaluationReport = {
+            overallScore: evaluation.overallScore ?? 0,
+            summary: evaluation.overallFeedback ?? "",
+            strengths: evaluation.strengths ?? [],
+            improvements: evaluation.improvements ?? [],
+            dimensionScores: {},
+            verdict: (evaluation.overallScore ?? 0) >= 80
+              ? "推荐录用" : (evaluation.overallScore ?? 0) >= 60 ? "待定" : "不推荐",
+          };
+        }
+      } catch {
+        // 评估未完成或不存在，忽略
+      }
+
+      setActiveRecord({
+        ...record,
+        candidateName: record.candidateName,
+        direction: record.direction,
+        status: record.status,
+        overallScore: record.overallScore,
+        verdict: record.verdict,
+        totalRounds: record.totalRounds,
+        createdAt: record.createdAt,
+        messages: detail?.messages ?? [],
+        evaluationReport,
+        _voiceEvalDetail: voiceEvalDetail,
+      } as any);
+    } catch (err) {
+      console.error("获取语音面试详情失败:", err);
+      setActiveRecord(record as any);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   const statusLabels: Record<string, string> = {
     PREPARING: "准备中",
     IN_PROGRESS: "进行中",
@@ -151,11 +253,38 @@ export default function InterviewRecordsView() {
   return (
     <div className="space-y-6">
       {/* 头部 */}
-      <div>
-        <h1 className="text-2xl font-bold font-sans text-slate-900 tracking-tight">面试历史记录</h1>
-        <p className="text-sm text-slate-500 font-sans mt-0.5">
-          {data ? `共 ${data.totalElements} 条记录，第 ${data.number + 1}/${data.totalPages || 1} 页` : "加载中..."}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold font-sans text-slate-900 tracking-tight">面试历史记录</h1>
+          <p className="text-sm text-slate-500 font-sans mt-0.5">
+            {interviewType === "mock"
+              ? (data ? `共 ${data.totalElements} 条记录，第 ${data.number + 1}/${data.totalPages || 1} 页` : "加载中...")
+              : `共 ${voiceRecords.length} 条语音面试记录`}
+          </p>
+        </div>
+        {/* 面试类型切换 */}
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+          <button
+            onClick={() => { setInterviewType("mock"); setPage(0); }}
+            className={`text-xs font-semibold px-4 py-2 rounded-lg transition cursor-pointer ${
+              interviewType === "mock"
+                ? "bg-white text-primary shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            模拟面试
+          </button>
+          <button
+            onClick={() => { setInterviewType("voice"); }}
+            className={`text-xs font-semibold px-4 py-2 rounded-lg transition cursor-pointer ${
+              interviewType === "voice"
+                ? "bg-white text-primary shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            语音面试
+          </button>
+        </div>
       </div>
 
       {/* 搜索和筛选 */}
@@ -192,6 +321,7 @@ export default function InterviewRecordsView() {
       </div>
 
       {/* 批量操作栏 */}
+      {interviewType === "mock" && (
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button onClick={toggleSelectAll} className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition cursor-pointer flex items-center gap-1.5">
@@ -215,24 +345,25 @@ export default function InterviewRecordsView() {
           </button>
         )}
       </div>
+      )}
 
-      {/* 加载中 */}
-      {loading && (
+      {/* 模拟面试：加载中 */}
+      {interviewType === "mock" && loading && (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 text-primary animate-spin" />
         </div>
       )}
 
-      {/* 错误 */}
-      {error && !loading && (
+      {/* 模拟面试：错误 */}
+      {interviewType === "mock" && error && !loading && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
           <p className="text-red-600 text-sm">{error}</p>
           <button onClick={fetchRecords} className="mt-3 text-xs text-primary font-bold hover:underline cursor-pointer">重新加载</button>
         </div>
       )}
 
-      {/* 记录卡片列表 */}
-      {!loading && !error && data && (
+      {/* 模拟面试：记录卡片列表 */}
+      {interviewType === "mock" && !loading && !error && data && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {data.content.map(record => (
@@ -333,6 +464,88 @@ export default function InterviewRecordsView() {
         </>
       )}
 
+      {/* 语音面试：加载中 */}
+      {interviewType === "voice" && voiceLoading && (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        </div>
+      )}
+
+      {/* 语音面试：错误 */}
+      {interviewType === "voice" && voiceError && !voiceLoading && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+          <p className="text-red-600 text-sm">{voiceError}</p>
+          <button onClick={fetchVoiceRecords} className="mt-3 text-xs text-primary font-bold hover:underline cursor-pointer">重新加载</button>
+        </div>
+      )}
+
+      {/* 语音面试：记录卡片列表 */}
+      {interviewType === "voice" && !voiceLoading && !voiceError && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {voiceRecords.map(record => (
+            <div
+              key={record.sessionId}
+              className="bg-white/80 hover:bg-white backdrop-blur-md p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition cursor-pointer group flex flex-col justify-between hover:scale-[1.01] duration-200"
+              onClick={() => handleVoiceDetail(record)}
+            >
+              <div className="space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                      {record.candidateName || "未知"}
+                      <span className={`text-[10px] font-bold border rounded-full px-2 py-0.5 ${statusStyles[record.status] || "bg-slate-50 text-slate-500"}`}>
+                        {statusLabels[record.status] || record.status}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">{record.direction} · {record.level}</p>
+                  </div>
+                  {record.overallScore > 0 && (
+                    <div className="bg-primary/5 p-2 rounded-xl border border-primary/5 text-center min-w-14">
+                      <span className="text-[9px] uppercase font-bold text-slate-400 block">分数</span>
+                      <span className="text-base font-black text-primary">{record.overallScore}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[10px] text-slate-500 border-t border-slate-100 pt-3">
+                  <div className="flex justify-between">
+                    <span>模式:</span>
+                    <span className="font-bold text-slate-700">语音</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>轮次:</span>
+                    <span className="font-bold text-slate-700">{record.totalRounds}</span>
+                  </div>
+                  {record.verdict && (
+                    <div className="flex justify-between col-span-2">
+                      <span>结论:</span>
+                      <span className={`font-bold text-[10px] border rounded-full px-2 py-0.5 ${getVerdictStyle(record.verdict)}`}>
+                        {record.verdict}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between border-t border-slate-100 pt-3 mt-4 text-[10px] text-slate-400">
+                <span>创建: {record.createdAt?.slice(0, 16) || "-"}</span>
+                <span className="text-primary font-bold group-hover:translate-x-1 transition duration-200">
+                  查看详情 →
+                </span>
+              </div>
+            </div>
+          ))}
+
+          {voiceRecords.length === 0 && (
+            <div className="col-span-full border border-dashed rounded-2xl p-12 text-center text-slate-400 space-y-2">
+              <FileSpreadsheet className="w-8 h-8 mx-auto" />
+              <p className="text-sm font-semibold">暂无语音面试记录</p>
+              <p className="text-xs">进入"语音面试"开始您的第一场语音面试吧</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 详情弹窗 */}
       {activeRecord && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
@@ -375,7 +588,7 @@ export default function InterviewRecordsView() {
                   </div>
                   <div className="bg-slate-50 p-3 rounded-xl">
                     <span className="text-[10px] uppercase text-slate-400 block">总轮次</span>
-                    <span className="text-xs font-bold text-slate-700">{activeRecord.currentRound}</span>
+                    <span className="text-xs font-bold text-slate-700">{activeRecord.currentRound ?? (activeRecord as any).totalRounds ?? "-"}</span>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-xl">
                     <span className="text-[10px] uppercase text-slate-400 block">综合评分</span>
@@ -473,6 +686,76 @@ export default function InterviewRecordsView() {
                         </ul>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* 语音面试逐题评估 */}
+                {activeRecord.mode === "voice" && (activeRecord as any)._voiceEvalDetail && (
+                  <div className="space-y-4 border-t border-slate-100 pt-4">
+                    <div className="flex items-center gap-2">
+                      <Award className="w-5 h-5 text-purple-500" />
+                      <h3 className="text-sm font-bold text-slate-800">逐题评估</h3>
+                    </div>
+                    <div className="space-y-3">
+                      {((activeRecord as any)._voiceEvalDetail as VoiceEvaluationDetail).answers?.map((item: any, i: number) => (
+                        <div key={i} className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                          <div className="flex items-start justify-between gap-3 mb-2">
+                            <div className="flex-1">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase">第 {item.questionIndex ?? i + 1} 题</span>
+                              <p className="text-xs font-semibold text-slate-800 mt-0.5">{item.question}</p>
+                            </div>
+                            <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                              (item.score ?? 0) >= 80 ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                              (item.score ?? 0) >= 60 ? "bg-amber-50 text-amber-700 border-amber-200" :
+                              "bg-red-50 text-red-700 border-red-200"
+                            }`}>
+                              {item.score ?? "-"} 分
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 leading-relaxed mb-2">
+                            <span className="font-bold text-slate-500">回答：</span>{item.userAnswer || "（无回答）"}
+                          </p>
+                          {item.feedback && (
+                            <p className="text-xs text-slate-600 leading-relaxed mb-2">
+                              <span className="font-bold text-slate-500">评价：</span>{item.feedback}
+                            </p>
+                          )}
+                          {item.keyPoints && item.keyPoints.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {item.keyPoints.map((kp: string, j: number) => (
+                                <span key={j} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full border border-blue-100">
+                                  {kp}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 语音面试对话记录 */}
+                {activeRecord.mode === "voice" && (activeRecord as any).messages && (activeRecord as any).messages.length > 0 && (
+                  <div className="space-y-4 border-t border-slate-100 pt-4">
+                    <div className="flex items-center gap-2">
+                      <Star className="w-5 h-5 text-indigo-500" />
+                      <h3 className="text-sm font-bold text-slate-800">对话记录</h3>
+                    </div>
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {((activeRecord as any).messages as { role: string; content: string; timestamp?: string }[]).map((msg, i) => (
+                        <div key={i} className={`p-3 rounded-xl text-xs ${
+                          msg.role === "interviewer" || msg.role === "assistant"
+                            ? "bg-blue-50 text-slate-700"
+                            : "bg-emerald-50 text-slate-700"
+                        }`}>
+                          <span className="text-[10px] font-bold text-slate-400 block mb-1">
+                            {msg.role === "interviewer" || msg.role === "assistant" ? "🤖 面试官" : "👤 候选人"}
+                          </span>
+                          <p className="leading-relaxed">{msg.content}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 

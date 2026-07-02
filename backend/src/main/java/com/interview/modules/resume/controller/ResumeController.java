@@ -155,7 +155,6 @@ public class ResumeController {
             return Result.error(e.getMessage());
         }
     }
-
     /**
      * 从人才库移除
      */

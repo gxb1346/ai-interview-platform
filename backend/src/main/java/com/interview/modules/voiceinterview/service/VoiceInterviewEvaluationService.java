@@ -1,0 +1,313 @@
+package com.interview.modules.voiceinterview.service;
+
+import com.interview.common.ai.LlmProviderRegistry;
+import com.interview.common.evaluation.EvaluationReport;
+import com.interview.common.evaluation.QaRecord;
+import com.interview.common.evaluation.UnifiedEvaluationService;
+import com.interview.common.exception.BusinessException;
+import com.interview.common.exception.ErrorCode;
+import com.interview.modules.voiceinterview.dto.VoiceEvaluationDetailDTO;
+import com.interview.modules.voiceinterview.dto.VoiceEvaluationDetailDTO.AnswerDetail;
+import com.interview.modules.voiceinterview.model.VoiceInterviewEvaluationEntity;
+import com.interview.modules.voiceinterview.model.VoiceInterviewMessageEntity;
+import com.interview.modules.voiceinterview.model.VoiceInterviewSessionEntity;
+import com.interview.modules.voiceinterview.repository.VoiceInterviewEvaluationRepository;
+import com.interview.modules.voiceinterview.repository.VoiceInterviewMessageRepository;
+import com.interview.modules.voiceinterview.repository.VoiceInterviewSessionRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * 语音面试评估服务
+ * 复用 UnifiedEvaluationService 的分批评估 + 结构化输出 + 降级兜底
+ */
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class VoiceInterviewEvaluationService {
+
+    private final UnifiedEvaluationService unifiedEvaluationService;
+    private final LlmProviderRegistry llmProviderRegistry;
+    private final VoiceInterviewEvaluationRepository evaluationRepository;
+    private final VoiceInterviewMessageRepository messageRepository;
+    private final VoiceInterviewSessionRepository sessionRepository;
+    private final ObjectMapper objectMapper;
+
+    /**
+     * 生成语音面试评估（由异步消费者调用）
+     * LLM 调用在事务外执行，仅 DB 写入在事务内
+     */
+    public void generateEvaluation(Long sessionId) {
+        try {
+            log.info("开始生成语音面试评估: sessionId={}", sessionId);
+
+            VoiceInterviewSessionEntity session = getSession(sessionId);
+            List<VoiceInterviewMessageEntity> messages = messageRepository
+                .findBySessionIdOrderBySequenceNumAsc(sessionId);
+
+            if (messages.isEmpty()) {
+                log.warn("语音面试会话无对话记录，生成空评估结果: sessionId={}", sessionId);
+                saveEmptyEvaluationTransactional(sessionId, session);
+                return;
+            }
+
+            List<QaRecord> qaRecords = buildQaRecords(messages);
+
+            String provider = session.getLlmProvider();
+            ChatClient chatClient = llmProviderRegistry.getPlainChatClient(provider);
+
+            String sessionIdStr = String.valueOf(sessionId);
+            String referenceContext = ""; // TODO: replace with SkillRegistry implementation
+            EvaluationReport report = unifiedEvaluationService.evaluate(
+                chatClient, sessionIdStr, qaRecords, null, referenceContext);
+
+            saveEvaluationTransactional(sessionId, session, report);
+
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("生成语音面试评估失败: sessionId={}", sessionId, e);
+            throw new BusinessException(ErrorCode.VOICE_EVALUATION_FAILED,
+                "生成评估失败: " + e.getMessage());
+        }
+    }
+
+    public VoiceEvaluationDetailDTO getEvaluation(Long sessionId) {
+        VoiceInterviewEvaluationEntity evaluation = evaluationRepository.findBySessionId(sessionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.VOICE_EVALUATION_NOT_FOUND,
+                "评估结果不存在: " + sessionId));
+
+        return buildDetailDTO(evaluation);
+    }
+
+    private List<QaRecord> buildQaRecords(List<VoiceInterviewMessageEntity> messages) {
+        List<QaRecord> records = new ArrayList<>();
+        int index = 0;
+        PendingQuestion pendingQuestion = null;
+
+        for (VoiceInterviewMessageEntity msg : messages) {
+            String aiText = VoiceInterviewMessageEntity.trimToNull(msg.getAiGeneratedText());
+            String userText = VoiceInterviewMessageEntity.trimToNull(msg.getUserRecognizedText());
+
+            if (pendingQuestion != null && userText != null) {
+                records.add(new QaRecord(
+                    index,
+                    pendingQuestion.question(),
+                    pendingQuestion.category(),
+                    userText
+                ));
+                index++;
+                pendingQuestion = null;
+                if (aiText != null) {
+                    pendingQuestion = new PendingQuestion(aiText, inferCategory(aiText));
+                }
+                continue;
+            }
+
+            if (pendingQuestion != null) {
+                records.add(new QaRecord(
+                    index,
+                    pendingQuestion.question(),
+                    pendingQuestion.category(),
+                    null
+                ));
+                index++;
+                pendingQuestion = null;
+            }
+
+            if (aiText != null && userText != null) {
+                records.add(new QaRecord(index, aiText, inferCategory(aiText), userText));
+                index++;
+            } else if (aiText != null) {
+                pendingQuestion = new PendingQuestion(aiText, inferCategory(aiText));
+            } else if (userText != null) {
+                records.add(new QaRecord(index, "", "综合", userText));
+                index++;
+            }
+        }
+
+        if (pendingQuestion != null) {
+            records.add(new QaRecord(
+                index,
+                pendingQuestion.question(),
+                pendingQuestion.category(),
+                null
+            ));
+        }
+
+        return records;
+    }
+
+    private record PendingQuestion(String question, String category) {}
+
+    private String inferCategory(String aiText) {
+        if (aiText == null) return "综合";
+        if (aiText.contains("项目") || aiText.contains("实习") || aiText.contains("工作经历")) return "项目深挖";
+        if (aiText.contains("自我介绍") || aiText.contains("介绍一下自己")) return "自我介绍";
+        if (aiText.contains("职业规划") || aiText.contains("为什么") || aiText.contains("优缺点")) return "HR问题";
+        return "技术问题";
+    }
+
+    @Transactional
+    public void saveEvaluationTransactional(Long sessionId, VoiceInterviewSessionEntity session,
+                                 EvaluationReport report) {
+        try {
+            List<EvaluationReport.QuestionEvaluation> questionItems = report.questionDetails();
+            List<EvaluationReport.ReferenceAnswer> refAnswerItems = report.referenceAnswers();
+
+            // 幂等性保护：如果已存在评估记录，则更新而非新建，避免唯一键冲突
+            VoiceInterviewEvaluationEntity entity = evaluationRepository.findBySessionId(sessionId)
+                .orElseGet(() -> VoiceInterviewEvaluationEntity.builder().sessionId(sessionId).build());
+
+            entity.setOverallScore(report.overallScore());
+            entity.setOverallFeedback(report.overallFeedback());
+            entity.setQuestionEvaluationsJson(objectMapper.writeValueAsString(questionItems));
+            entity.setStrengthsJson(objectMapper.writeValueAsString(report.strengths()));
+            entity.setImprovementsJson(objectMapper.writeValueAsString(report.improvements()));
+            entity.setReferenceAnswersJson(objectMapper.writeValueAsString(refAnswerItems));
+            entity.setInterviewerRole(session.getRoleType());
+            entity.setInterviewDate(session.getStartTime());
+
+            evaluationRepository.save(entity);
+            log.info("评估结果已保存: sessionId={}, score={}", sessionId, entity.getOverallScore());
+
+            // 回写每条用户消息的分数，确保 voice_interview_messages.score 不再为 null
+            updateMessageScores(sessionId, questionItems);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("保存评估结果失败: sessionId={}", sessionId, e);
+            throw new BusinessException(ErrorCode.VOICE_EVALUATION_FAILED,
+                "保存评估失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 回写每条用户消息的评分，匹配规则：根据问题文本 + 用户回答文本匹配
+     */
+    private void updateMessageScores(Long sessionId, List<EvaluationReport.QuestionEvaluation> questionItems) {
+        if (questionItems == null || questionItems.isEmpty()) {
+            return;
+        }
+
+        List<VoiceInterviewMessageEntity> messages = messageRepository
+            .findBySessionIdOrderBySequenceNumAsc(sessionId);
+        int updated = 0;
+
+        for (EvaluationReport.QuestionEvaluation q : questionItems) {
+            if (q.userAnswer() == null || q.userAnswer().isBlank()) {
+                continue;
+            }
+            for (VoiceInterviewMessageEntity msg : messages) {
+                String userText = VoiceInterviewMessageEntity.trimToNull(msg.getUserRecognizedText());
+                if (userText != null && userText.equals(q.userAnswer())) {
+                    msg.setScore(q.score());
+                    msg.setScoreFeedback(q.feedback());
+                    messageRepository.save(msg);
+                    updated++;
+                    break;
+                }
+            }
+        }
+
+        log.info("消息评分回写完成: sessionId={}, updated={}/{}", sessionId, updated, questionItems.size());
+    }
+
+    @Transactional
+    public void saveEmptyEvaluationTransactional(Long sessionId, VoiceInterviewSessionEntity session) {
+        try {
+            VoiceInterviewEvaluationEntity entity = evaluationRepository.findBySessionId(sessionId)
+                .orElseGet(() -> VoiceInterviewEvaluationEntity.builder().sessionId(sessionId).build());
+
+            entity.setOverallScore(0);
+            entity.setOverallFeedback("本次语音面试未形成有效对话记录，暂无可评估内容。");
+            entity.setQuestionEvaluationsJson("[]");
+            entity.setStrengthsJson("[]");
+            entity.setImprovementsJson("[\"请先完成至少一轮有效问答后再生成评估。\"]");
+            entity.setReferenceAnswersJson("[]");
+            entity.setInterviewerRole(session.getRoleType());
+            entity.setInterviewDate(session.getStartTime());
+
+            evaluationRepository.save(entity);
+            log.info("空评估结果已保存: sessionId={}", sessionId);
+        } catch (Exception e) {
+            log.error("保存空评估结果失败: sessionId={}", sessionId, e);
+            throw new BusinessException(ErrorCode.VOICE_EVALUATION_FAILED,
+                "保存空评估失败: " + e.getMessage());
+        }
+    }
+
+    private VoiceEvaluationDetailDTO buildDetailDTO(VoiceInterviewEvaluationEntity entity) {
+        try {
+            List<EvaluationReport.QuestionEvaluation> questionItems = objectMapper.readValue(
+                entity.getQuestionEvaluationsJson(),
+                new TypeReference<List<EvaluationReport.QuestionEvaluation>>() {}
+            );
+
+            List<String> strengths = objectMapper.readValue(
+                entity.getStrengthsJson(),
+                new TypeReference<List<String>>() {}
+            );
+
+            List<String> improvements = objectMapper.readValue(
+                entity.getImprovementsJson(),
+                new TypeReference<List<String>>() {}
+            );
+
+            List<EvaluationReport.ReferenceAnswer> refAnswers = objectMapper.readValue(
+                entity.getReferenceAnswersJson(),
+                new TypeReference<List<EvaluationReport.ReferenceAnswer>>() {}
+            );
+
+            Map<Integer, EvaluationReport.ReferenceAnswer> refMap = refAnswers.stream()
+                .collect(Collectors.toMap(
+                    EvaluationReport.ReferenceAnswer::questionIndex, r -> r, (a, b) -> a));
+
+            List<AnswerDetail> answers = new ArrayList<>();
+            for (EvaluationReport.QuestionEvaluation q : questionItems) {
+                EvaluationReport.ReferenceAnswer ref = refMap.get(q.questionIndex());
+                answers.add(AnswerDetail.builder()
+                    .questionIndex(q.questionIndex())
+                    .question(q.question())
+                    .category(q.category())
+                    .userAnswer(q.userAnswer())
+                    .score(q.score())
+                    .feedback(q.feedback())
+                    .referenceAnswer(ref != null ? ref.referenceAnswer() : null)
+                    .keyPoints(ref != null ? ref.keyPoints() : null)
+                    .build());
+            }
+
+            return VoiceEvaluationDetailDTO.builder()
+                .sessionId(entity.getSessionId())
+                .totalQuestions(answers.size())
+                .overallScore(entity.getOverallScore())
+                .overallFeedback(entity.getOverallFeedback())
+                .strengths(strengths)
+                .improvements(improvements)
+                .answers(answers)
+                .build();
+
+        } catch (Exception e) {
+            log.error("构建评估详情失败: sessionId={}", entity.getSessionId(), e);
+            throw new BusinessException(ErrorCode.VOICE_EVALUATION_FAILED,
+                "构建评估结果失败: " + e.getMessage());
+        }
+    }
+
+    private VoiceInterviewSessionEntity getSession(Long sessionId) {
+        return sessionRepository.findById(sessionId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND,
+                "语音面试会话不存在: " + sessionId));
+    }
+}

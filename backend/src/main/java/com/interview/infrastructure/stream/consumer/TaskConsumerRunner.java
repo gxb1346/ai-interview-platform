@@ -28,6 +28,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 支持 N 个并行消费者（同一消费者组内），实现任务并行处理
  */
 @Component
+/**
+ * @deprecated 已被 {@link com.interview.common.async.AbstractStreamConsumer} 替代，
+ *             新版基于 Redisson Stream API，功能更完善。
+ *             请逐步迁移到新版。
+ */
+@Deprecated
 public class TaskConsumerRunner {
 
     private static final Logger log = LoggerFactory.getLogger(TaskConsumerRunner.class);

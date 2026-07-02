@@ -25,6 +25,12 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Component
+/**
+ * @deprecated 已被 {@link com.interview.common.evaluation.UnifiedEvaluationService} 替代，
+ *             新版支持结构化输出自修复、二次汇总、降级兜底等更强功能。
+ *             请逐步迁移到新版。
+ */
+@Deprecated
 public class UnifiedEvaluationEngine {
 
     private static final int BATCH_SIZE = 5;  // 每批次评估 5 轮对话

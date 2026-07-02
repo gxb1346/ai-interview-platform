@@ -323,6 +323,14 @@ export interface DashboardStats {
   directionStats: { direction: string; count: number }[];
   statusStats: { status: string; count: number }[];
   dailyStats: { date: string; count: number }[];
+  // 语音面试统计
+  voiceTotalSessions?: number;
+  voiceCompletedSessions?: number;
+  voiceInProgressSessions?: number;
+  voiceAverageScore?: number;
+  voicePassRate?: number;
+  voiceDirectionStats?: { direction: string; count: number }[];
+  voiceDailyStats?: { date: string; count: number }[];
 }
 
 /** 面试历史搜索条件 */
@@ -409,4 +417,157 @@ export interface UserProfile {
 export interface TokenRefreshResponse {
   token: string;
   refreshToken: string;
+}
+/* ===== 语音面试模块 ===== */
+
+export interface CreateVoiceSessionRequest {
+  userId: string;
+  candidateName?: string;
+  skillId: string;
+  roleType: string;
+}
+
+export interface VoiceSessionMeta {
+  id?: number;
+  sessionId?: number;
+  userId: string;
+  candidateName?: string;
+  skillId: string;
+  roleType: string;
+  status: string;
+  createdAt: string;
+  updatedAt?: string;
+  overallScore?: number;
+  messageCount?: number;
+  evaluateStatus?: string;
+}
+
+export interface VoiceSessionDetail {
+  id?: number;
+  sessionId?: number;
+  userId: string;
+  skillId: string;
+  roleType: string;
+  status: string;
+  messages: { role: string; content: string; timestamp: string }[];
+  createdAt: string;
+}
+
+export interface VoiceEvaluationStatus {
+  sessionId: number;
+  evaluateStatus?: string; // PENDING / PROCESSING / COMPLETED / FAILED
+  evaluateError?: string;
+  evaluation?: VoiceEvaluationDetail;
+  status?: string;
+  overallScore?: number;
+  totalRounds?: number;
+  verdict?: string;
+  summary?: string;
+  strengths?: string[];
+  improvements?: string[];
+  dimensionScores?: Record<string, number>;
+  evaluatedAt?: string;
+}
+
+export interface VoiceEvaluationDetail {
+  sessionId?: number;
+  overallScore?: number;
+  overallFeedback?: string;
+  questionEvaluations?: QuestionEvalItem[];
+  strengths?: string[];
+  improvements?: string[];
+  answerDetails?: AnswerDetail[];
+  answers?: VoiceAnswerEvalItem[];
+}
+
+export interface VoiceAnswerEvalItem {
+  questionIndex?: number;
+  question?: string;
+  category?: string;
+  userAnswer?: string;
+  score?: number;
+  feedback?: string;
+  referenceAnswer?: string;
+  keyPoints?: string[];
+}
+
+export interface QuestionEvalItem {
+  questionIndex?: number;
+  question?: string;
+  category?: string;
+  userAnswer?: string;
+  score?: number;
+  feedback?: string;
+  referenceAnswer?: string;
+  keyPoints?: string[];
+}
+
+export interface AnswerDetail {
+  question?: string;
+  answer?: string;
+  score?: number;
+  feedback?: string;
+}
+
+/* ===== LLM 提供商模块 ===== */
+
+export interface LlmProvider {
+  id: string;
+  name?: string;
+  baseUrl?: string;
+  model?: string;
+  embeddingModel?: string;
+  supportsEmbedding?: boolean;
+  enabled?: boolean;
+  createdAt?: string;
+}
+
+export interface LlmProviderTestResult {
+  success: boolean;
+  message?: string;
+  latencyMs?: number;
+}
+
+export interface LlmDefaultProvider {
+  defaultChatProviderId: string;
+  defaultEmbeddingProviderId?: string;
+}
+
+export interface AsrConfig {
+  provider?: string;
+  model?: string;
+  apiKey?: string;
+}
+
+export interface TtsConfig {
+  provider?: string;
+  model?: string;
+  voice?: string;
+}
+
+/* ===== 面试日程模块 ===== */
+
+export interface InterviewSchedule {
+  id: number;
+  companyName: string;
+  position: string;
+  interviewTime: string;
+  interviewType: string;
+  status: string;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ParseInterviewRequest {
+  rawText: string;
+}
+
+export interface ParseInterviewResponse {
+  companyName?: string;
+  position?: string;
+  interviewTime?: string;
+  interviewType?: string;
+  notes?: string;
+  rawText?: string;
 }

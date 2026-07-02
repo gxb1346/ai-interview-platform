@@ -111,11 +111,13 @@ public class StructuredOutputInvoker {
         String logContext,
         Logger log
     ) {
+        String cleaned = stripMarkdownCodeBlock(content);
         try {
-            return outputConverter.convert(content);
+            return outputConverter.convert(cleaned);
         } catch (Exception firstError) {
-            String repaired = repairUnescapedQuotesInJsonStrings(content);
-            if (!repaired.equals(content)) {
+            // 尝试修复 JSON 字符串内未转义引号
+            String repaired = repairUnescapedQuotesInJsonStrings(cleaned);
+            if (!repaired.equals(cleaned)) {
                 try {
                     T result = outputConverter.convert(repaired);
                     log.warn("{}结构化 JSON 存在未转义引号，已在本地修复后解析成功", logContext);
@@ -126,6 +128,42 @@ public class StructuredOutputInvoker {
             }
             throw firstError;
         }
+    }
+
+    /** 剥离 LLM 返回的 Markdown 代码块包裹（如 ```json ... ```），并提取 JSON 对象 */
+    private String stripMarkdownCodeBlock(String content) {
+        if (content == null || content.isBlank()) {
+            return content;
+        }
+        String trimmed = content.trim();
+
+        // 1. 剥离 Markdown 代码块 ```json ... ``` 或 ``` ... ```
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline > 0) {
+                String inner = trimmed.substring(firstNewline + 1);
+                if (inner.endsWith("```")) {
+                    inner = inner.substring(0, inner.length() - 3).trim();
+                }
+                return extractJsonObject(inner);
+            }
+        }
+
+        // 2. 直接提取 JSON 对象（处理前面有文字说明的情况）
+        return extractJsonObject(trimmed);
+    }
+
+    /** 从文本中提取第一个完整的 JSON 对象 */
+    private String extractJsonObject(String text) {
+        if (text == null || text.isBlank()) {
+            return text;
+        }
+        int firstBrace = text.indexOf('{');
+        int lastBrace = text.lastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            return text.substring(firstBrace, lastBrace + 1).trim();
+        }
+        return text;
     }
 
     private String repairUnescapedQuotesInJsonStrings(String content) {

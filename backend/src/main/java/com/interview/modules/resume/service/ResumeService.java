@@ -473,6 +473,19 @@ public class ResumeService {
     }
 
     /**
+     * 移入人才库
+     */
+    @Transactional
+    public ResumeVO addToTalentPool(Long id) {
+        Resume resume = resumeRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("简历不存在: id=" + id));
+        resume.setInTalentPool(true);
+        resume.setTalentStatus(TalentStatus.NEW);
+        Resume saved = resumeRepository.save(resume);
+        return ResumeVO.fromEntity(saved);
+    }
+
+    /**
      * 从人才库移除
      */
     @Transactional

@@ -21,6 +21,12 @@ import org.springframework.stereotype.Component;
  * 消费者根据 taskType 分发到不同的处理器。
  */
 @Component
+/**
+ * @deprecated 已被 {@link com.interview.common.async.AbstractStreamProducer} 替代，
+ *             新版基于 Redisson Stream API，功能更完善。
+ *             请逐步迁移到新版。
+ */
+@Deprecated
 public class TaskProducer {
 
     private static final Logger log = LoggerFactory.getLogger(TaskProducer.class);

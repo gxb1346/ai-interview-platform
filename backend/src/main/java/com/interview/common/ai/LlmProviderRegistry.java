@@ -145,6 +145,15 @@ public class LlmProviderRegistry {
     }
 
     /**
+     * 获取纯语音面试 ChatClient（不含 ToolCallAdvisor，避免流式聚合错误）。
+     * 仅保留 interviewSkillsToolCallback 用于技能标签注入，去除可能干扰流式输出的 Advisor。
+     */
+    public ChatClient getPlainVoiceChatClient(String providerId) {
+        String id = resolveProviderId(providerId);
+        return clientCache.computeIfAbsent(id + ":voice-plain", key -> createPlainVoiceChatClient(id));
+    }
+
+    /**
      * 清空缓存，重新加载所有 provider。
      */
     public void reload() {
@@ -206,6 +215,19 @@ public class LlmProviderRegistry {
             builder.defaultAdvisors(advisors.toArray(new Advisor[0]));
         }
         log.info("[LlmProviderRegistry] Created voice ChatClient (SkillsTool + streaming ToolCall) for {}", providerId);
+        return builder.build();
+    }
+
+    private ChatClient createPlainVoiceChatClient(String providerId) {
+        OpenAiChatModel chatModel = getChatModel(providerId);
+
+        ChatClient.Builder builder = ChatClient.builder(chatModel);
+        if (interviewSkillsToolCallback != null) {
+            builder.defaultToolCallbacks(interviewSkillsToolCallback);
+        }
+        // 不加 ToolCallAdvisor 和 SafeGuardAdvisor，避免干扰流式输出
+        // 仅保留 SkillsToolCallback 用于技能标签注入
+        log.info("[LlmProviderRegistry] Created plain voice ChatClient (SkillsTool only, no advisors) for {}", providerId);
         return builder.build();
     }
 

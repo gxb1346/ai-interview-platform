@@ -108,7 +108,7 @@ export default function InterviewCenterView({
     setGeneratingQuestionsId(int.id);
     const candidate = allCandidates.find(c => c.id === int.candidateId);
     try {
-      const response = await fetch("/api/interview/suggest-questions", {
+      const response = await authFetch(`${API_BASE}/api/interview/suggest-questions`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ candidateName: int.candidateName, role: int.role,
           strengths: candidate?.strengths || [], aiSummary: candidate?.aiSummary || "" })

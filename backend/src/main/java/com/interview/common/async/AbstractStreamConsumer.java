@@ -2,77 +2,80 @@ package com.interview.common.async;
 
 import com.interview.common.constant.AsyncTaskStreamConstants;
 import com.interview.infrastructure.redis.RedisService;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.stream.StreamMessageId;
+import org.springframework.beans.factory.InitializingBean;
 
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
-public abstract class AbstractStreamConsumer<T> {
+public abstract class AbstractStreamConsumer<T> implements InitializingBean {
 
     private final RedisService redisService;
     private final AtomicBoolean running = new AtomicBoolean(false);
-    private ExecutorService executorService;
     private String consumerName;
+    private Thread consumerThread;
 
     protected AbstractStreamConsumer(RedisService redisService) {
         this.redisService = redisService;
     }
 
-    @PostConstruct
-    public void init() {
+    @Override
+    public void afterPropertiesSet() {
+        if (running.get()) {
+            log.info("{} consumer already running, skipping duplicate initialization", taskDisplayName());
+            return;
+        }
+        log.info("=== {} InitializingBean.afterPropertiesSet() called ===", taskDisplayName());
         this.consumerName = consumerPrefix() + UUID.randomUUID().toString().substring(0, 8);
-        this.executorService = new ThreadPoolExecutor(
-            1,
-            1,
-            0L,
-            TimeUnit.MILLISECONDS,
-            new LinkedBlockingQueue<>(),
-            r -> {
-                Thread t = new Thread(r, threadName());
-                t.setDaemon(true);
-                return t;
-            },
-            new ThreadPoolExecutor.AbortPolicy()
-        );
 
         running.set(true);
-        executorService.submit(this::startConsumer);
+
+        this.consumerThread = new Thread(() -> {
+            log.info("{} consumer thread starting, thread={}", taskDisplayName(), Thread.currentThread().getName());
+            try {
+                startConsumer();
+            } catch (Exception e) {
+                log.error("{} consumer thread fatal error", taskDisplayName(), e);
+            }
+        }, threadName());
+        consumerThread.setDaemon(true);
+        consumerThread.start();
+
         log.info("{} consumer started: consumerName={}", taskDisplayName(), consumerName);
     }
 
     @PreDestroy
     public void shutdown() {
         running.set(false);
-        if (executorService != null) {
-            executorService.shutdown();
+        if (consumerThread != null) {
+            consumerThread.interrupt();
         }
         log.info("{} consumer stopped: consumerName={}", taskDisplayName(), consumerName);
     }
 
     private void startConsumer() {
         try {
+            log.info("{} startConsumer: creating stream group, streamKey={}, groupName={}",
+                taskDisplayName(), streamKey(), groupName());
             redisService.createStreamGroup(streamKey(), groupName());
             log.info("Redis Stream group is ready: {}", groupName());
         } catch (Exception e) {
-            log.warn("Failed to prepare Redis Stream group: groupName={}", groupName(), e);
+            log.warn("Failed to prepare Redis Stream group: groupName={}, error={}", groupName(), e.getMessage());
         }
 
+        log.info("{} entering consumeLoop", taskDisplayName());
         consumeLoop();
     }
 
     private void consumeLoop() {
+        log.info("{} consumer loop started, thread={}", taskDisplayName(), Thread.currentThread().getName());
         while (running.get()) {
             try {
-                redisService.streamConsumeMessages(
+                boolean consumed = redisService.streamConsumeMessages(
                     streamKey(),
                     groupName(),
                     consumerName,
@@ -85,9 +88,10 @@ public abstract class AbstractStreamConsumer<T> {
                     log.info("Consumer thread interrupted");
                     break;
                 }
-                log.error("Failed to consume message", e);
+                log.error("{} consumer loop error: {}", taskDisplayName(), e.getMessage(), e);
             }
         }
+        log.info("{} consumer loop exited", taskDisplayName());
     }
 
     private void processMessage(StreamMessageId messageId, Map<String, String> data) {
@@ -109,6 +113,8 @@ public abstract class AbstractStreamConsumer<T> {
             log.info("{} task completed: {}", taskDisplayName(), payloadIdentifier(payload));
         } catch (Exception e) {
             log.error("{} task failed: {}", taskDisplayName(), payloadIdentifier(payload), e);
+            // 先 ACK 当前消息，再重试，防止同一消息被重复投递
+            ackMessage(messageId);
             if (retryCount < AsyncTaskStreamConstants.MAX_RETRY_COUNT) {
                 retryMessage(payload, retryCount + 1);
             } else {
@@ -116,7 +122,6 @@ public abstract class AbstractStreamConsumer<T> {
                     taskDisplayName() + " failed after retry " + retryCount + ": " + e.getMessage()
                 ));
             }
-            ackMessage(messageId);
         }
     }
 
@@ -141,6 +146,10 @@ public abstract class AbstractStreamConsumer<T> {
         } catch (Exception e) {
             log.error("Failed to ack stream message: messageId={}", messageId, e);
         }
+    }
+
+    protected boolean isRunning() {
+        return running.get();
     }
 
     protected RedisService redisService() {
