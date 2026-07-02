@@ -8,6 +8,7 @@ import {
   AlertCircle, ChevronRight, UserCheck, UserX, Clock, Mail, Phone, Calendar
 } from "lucide-react";
 import { ResumeVO, ApiResult, TalentStatus, Interview } from "../types";
+import { authFetch } from "../api";
 
 const API_BASE = "http://localhost:8082";
 
@@ -60,7 +61,7 @@ export default function TalentPoolView({
     if (!confirm("确定将该候选人移出人才库？")) return;
     setRemovingId(id);
     try {
-      const res = await fetch(`${API_BASE}/api/resume/${id}/remove-from-talent-pool`, { method: "DELETE" });
+      const res = await authFetch(`${API_BASE}/api/resume/${id}/remove-from-talent-pool`, { method: "DELETE" });
       const json: ApiResult<ResumeVO> = await res.json();
       if (json.code === 200) {
         setCandidates(prev => prev.filter(c => c.id !== id));
@@ -77,7 +78,7 @@ export default function TalentPoolView({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/resume/talent-pool`);
+      const res = await authFetch(`${API_BASE}/api/resume/talent-pool`);
       const json: ApiResult<ResumeVO[]> = await res.json();
       if (json.code === 200) {
         setCandidates(json.data || []);
@@ -149,7 +150,7 @@ export default function TalentPoolView({
   const handleUpdateStatus = async (id: number, status: string) => {
     setUpdatingId(id);
     try {
-      const res = await fetch(`${API_BASE}/api/resume/${id}/talent-status`, {
+      const res = await authFetch(`${API_BASE}/api/resume/${id}/talent-status`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ talentStatus: status })

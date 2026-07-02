@@ -56,7 +56,8 @@ public class VoiceInterviewRealTimeScoreService {
         try {
             String prompt = buildScorePrompt(questionText, answerText, phase);
             String response = callAiWithRetry(prompt);
-            ScoreResult result = objectMapper.readValue(response, ScoreResult.class);
+            String cleaned = cleanJsonResponse(response);
+            ScoreResult result = objectMapper.readValue(cleaned, ScoreResult.class);
 
             int clampedScore = result.score;
             if (clampedScore < 0) clampedScore = 0;
@@ -69,6 +70,42 @@ public class VoiceInterviewRealTimeScoreService {
             log.warn("实时评分失败，跳过评分: {}", e.getMessage());
             return null;
         }
+    }
+
+    /** 清洗 LLM 返回的 JSON：剥离 Markdown 代码块，提取第一个 JSON 对象 */
+    private String cleanJsonResponse(String content) {
+        if (content == null || content.isBlank()) {
+            return content;
+        }
+        String trimmed = content.trim();
+
+        // 剥离 Markdown 代码块 ```json ... ```
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline > 0) {
+                String inner = trimmed.substring(firstNewline + 1);
+                if (inner.endsWith("```")) {
+                    inner = inner.substring(0, inner.length() - 3).trim();
+                }
+                return extractJsonObject(inner);
+            }
+        }
+
+        // 直接提取 JSON 对象
+        return extractJsonObject(trimmed);
+    }
+
+    /** 从文本中提取第一个完整的 JSON 对象 */
+    private String extractJsonObject(String text) {
+        if (text == null || text.isBlank()) {
+            return text;
+        }
+        int firstBrace = text.indexOf('{');
+        int lastBrace = text.lastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            return text.substring(firstBrace, lastBrace + 1).trim();
+        }
+        return text;
     }
 
     private String callAiWithRetry(String prompt) {

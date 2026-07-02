@@ -3,6 +3,7 @@ import {
   BarChart3, Users, CheckCircle2, Clock, TrendingUp, Award,
   PieChart, Calendar, Loader2, RefreshCw
 } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 import { interviewApi } from "../api";
 import type { DashboardStats } from "../types";
 
@@ -171,35 +172,178 @@ export default function DashboardView() {
         </div>
       </div>
 
-      {/* 每日趋势 */}
+      {/* 每日趋势（合并 mock + 语音面试） */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
         <div className="flex items-center gap-2 mb-4">
           <Calendar className="w-4 h-4 text-primary" />
           <h3 className="text-sm font-bold text-slate-800">每日面试趋势</h3>
         </div>
-        {stats.dailyStats.length === 0 ? (
-          <p className="text-xs text-slate-400 py-4 text-center">暂无数据</p>
-        ) : (
-          <div className="flex items-end gap-2 h-32">
-            {stats.dailyStats.map((item, i) => {
-              const maxCount = Math.max(...stats.dailyStats.map(d => d.count), 1);
-              const height = Math.max((item.count / maxCount) * 100, 4);
-              return (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
-                  <span className="text-[10px] font-bold text-slate-600">{item.count}</span>
-                  <div className="w-full bg-primary/80 hover:bg-primary rounded-t-md transition-all cursor-pointer"
-                    style={{ height: `${height}%` }}
-                    title={`${item.date}: ${item.count} 场`}
-                  />
-                  <span className="text-[9px] text-slate-400 truncate w-full text-center">
-                    {item.date.slice(5)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {(() => {
+          // 合并 mock 和语音面试的每日统计数据
+          const dailyMap = new Map<string, { mock: number; voice: number }>();
+          (stats.dailyStats || []).forEach(d => {
+            const entry = dailyMap.get(d.date) || { mock: 0, voice: 0 };
+            entry.mock = d.count;
+            dailyMap.set(d.date, entry);
+          });
+          (stats.voiceDailyStats || []).forEach(d => {
+            const entry = dailyMap.get(d.date) || { mock: 0, voice: 0 };
+            entry.voice = d.count;
+            dailyMap.set(d.date, entry);
+          });
+          const merged = Array.from(dailyMap.entries())
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([date, counts]) => ({
+              date: date.slice(5),
+              fullDate: date,
+              "文本面试": counts.mock,
+              "语音面试": counts.voice,
+              total: counts.mock + counts.voice,
+            }));
+          if (merged.length === 0) {
+            return <p className="text-xs text-slate-400 py-4 text-center">暂无数据</p>;
+          }
+          return (
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={merged} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                <Tooltip
+                  contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }}
+                  labelFormatter={(label) => `日期: ${label}`}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line
+                  type="monotone"
+                  dataKey="文本面试"
+                  stroke="#00A8FF"
+                  strokeWidth={2}
+                  dot={{ r: 3, fill: "#00A8FF" }}
+                  activeDot={{ r: 5 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="语音面试"
+                  stroke="#6366f1"
+                  strokeWidth={2}
+                  dot={{ r: 3, fill: "#6366f1" }}
+                  activeDot={{ r: 5 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          );
+        })()}
       </div>
+
+      {/* 语音面试统计 */}
+      {(stats.voiceTotalSessions != null && stats.voiceTotalSessions > 0) && (
+        <>
+          <div className="border-t border-slate-200 pt-4">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded">语音面试</span>
+              <h2 className="text-lg font-bold text-slate-800">语音面试数据概览</h2>
+            </div>
+          </div>
+
+          {/* 语音面试核心指标 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <StatCard
+              icon={<Users className="w-5 h-5" />}
+              label="语音面试总数"
+              value={stats.voiceTotalSessions ?? 0}
+              color="bg-indigo-50 text-indigo-600 border-indigo-100"
+            />
+            <StatCard
+              icon={<CheckCircle2 className="w-5 h-5" />}
+              label="语音已完成"
+              value={stats.voiceCompletedSessions ?? 0}
+              color="bg-emerald-50 text-emerald-600 border-emerald-100"
+            />
+            <StatCard
+              icon={<Clock className="w-5 h-5" />}
+              label="语音进行中"
+              value={stats.voiceInProgressSessions ?? 0}
+              color="bg-amber-50 text-amber-600 border-amber-100"
+            />
+            <StatCard
+              icon={<Award className="w-5 h-5" />}
+              label="语音平均分"
+              value={stats.voiceAverageScore ?? 0}
+              suffix="分"
+              color="bg-purple-50 text-purple-600 border-purple-100"
+            />
+            <StatCard
+              icon={<TrendingUp className="w-5 h-5" />}
+              label="语音通过率"
+              value={stats.voicePassRate ?? 0}
+              suffix="%"
+              color="bg-teal-50 text-teal-600 border-teal-100"
+            />
+          </div>
+
+          {/* 语音面试方向分布 */}
+          {(stats.voiceDirectionStats?.length ?? 0) > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+              <div className="flex items-center gap-2 mb-4">
+                <BarChart3 className="w-4 h-4 text-indigo-500" />
+                <h3 className="text-sm font-bold text-slate-800">语音面试方向分布</h3>
+              </div>
+              <div className="space-y-2.5">
+                {stats.voiceDirectionStats!.map((item, i) => {
+                  const maxCount = Math.max(...stats.voiceDirectionStats!.map(d => d.count), 1);
+                  const pct = Math.round((item.count / maxCount) * 100);
+                  return (
+                    <div key={i} className="flex items-center gap-3">
+                      <span className="text-xs text-slate-600 w-24 truncate font-medium">{item.direction}</span>
+                      <div className="flex-1 bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-indigo-500 transition-all duration-500"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-bold text-slate-700 w-8 text-right">{item.count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 语音面试每日趋势 */}
+          {(stats.voiceDailyStats?.length ?? 0) > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+              <div className="flex items-center gap-2 mb-4">
+                <Calendar className="w-4 h-4 text-indigo-500" />
+                <h3 className="text-sm font-bold text-slate-800">语音面试每日趋势</h3>
+              </div>
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart
+                  data={stats.voiceDailyStats!.map(d => ({ date: d.date.slice(5), fullDate: d.date, count: d.count }))}
+                  margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12 }}
+                    labelFormatter={(label) => `日期: ${label}`}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="count"
+                    name="语音面试"
+                    stroke="#6366f1"
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: "#6366f1" }}
+                    activeDot={{ r: 5 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

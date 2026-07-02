@@ -5,6 +5,7 @@ import com.interview.modules.interview.model.InterviewSession;
 import com.interview.modules.interview.model.InterviewSessionRecord;
 import com.interview.modules.interview.service.AudioService;
 import com.interview.modules.interview.service.MockInterviewService;
+import com.interview.modules.voiceinterview.service.VoiceInterviewService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -29,11 +30,14 @@ public class MockInterviewController {
 
     private final MockInterviewService interviewService;
     private final AudioService audioService;
+    private final VoiceInterviewService voiceInterviewService;
 
     public MockInterviewController(MockInterviewService interviewService,
-                                    AudioService audioService) {
+                                    AudioService audioService,
+                                    VoiceInterviewService voiceInterviewService) {
         this.interviewService = interviewService;
         this.audioService = audioService;
+        this.voiceInterviewService = voiceInterviewService;
     }
 
     /**
@@ -253,11 +257,15 @@ public class MockInterviewController {
     }
 
     /**
-     * 获取面试仪表盘统计数据
+     * 获取面试仪表盘统计数据（含语音面试）
      */
     @GetMapping("/dashboard/stats")
     public ResponseEntity<Map<String, Object>> getDashboardStats() {
-        return ResponseEntity.ok(interviewService.getDashboardStats());
+        Map<String, Object> stats = interviewService.getDashboardStats();
+        // 合并语音面试统计数据
+        Map<String, Object> voiceStats = voiceInterviewService.getVoiceStats();
+        stats.putAll(voiceStats);
+        return ResponseEntity.ok(stats);
     }
 
     /**

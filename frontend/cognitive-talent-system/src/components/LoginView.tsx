@@ -28,7 +28,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     try {
       if (tab === "login") {
         const res = await authApi.login(username.trim(), password);
-        setToken(res.token);
+        setToken(res.token, res.refreshToken || null);
         if (res.refreshToken) setRefreshToken(res.refreshToken);
         setStoredUser({ username: res.username, displayName: res.displayName || res.username });
         onLoginSuccess();

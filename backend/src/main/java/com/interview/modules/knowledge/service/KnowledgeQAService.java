@@ -13,7 +13,8 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import tools.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -476,7 +477,12 @@ public class KnowledgeQAService {
             float distance = rs.getFloat("distance");
 
             @SuppressWarnings("unchecked")
-            Map<String, Object> metadata = jsonMapper.readValue(metadataJson, Map.class);
+            Map<String, Object> metadata;
+            try {
+                metadata = jsonMapper.readValue(metadataJson, Map.class);
+            } catch (JsonProcessingException e) {
+                throw new SQLException("Failed to parse metadata JSON", e);
+            }
             metadata.put(DocumentMetadata.DISTANCE.value(), distance);
 
             return Document.builder()

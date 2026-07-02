@@ -5,6 +5,7 @@ import {
   BookMarked, FileUp, MessageSquare, ExternalLink
 } from "lucide-react";
 import { KnowledgeDocument, KnowledgeStats } from "../types";
+import { authFetch } from "../api";
 
 const API_BASE = "http://localhost:8082";
 
@@ -23,8 +24,8 @@ export default function KnowledgeBaseView({ onNavigateToQA }: KnowledgeBaseViewP
   const loadData = async () => {
     try {
       const [docRes, statsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/knowledge/documents`),
-        fetch(`${API_BASE}/api/knowledge/statistics`)
+        authFetch(`${API_BASE}/api/knowledge/documents`),
+        authFetch(`${API_BASE}/api/knowledge/statistics`)
       ]);
       if (docRes.ok) setDocuments(await docRes.json());
       if (statsRes.ok) setStats(await statsRes.json());
@@ -46,7 +47,7 @@ export default function KnowledgeBaseView({ onNavigateToQA }: KnowledgeBaseViewP
       const formData = new FormData();
       formData.append("file", file);
       formData.append("title", file.name.replace(/\.[^/.]+$/, ""));
-      const res = await fetch(`${API_BASE}/api/knowledge/documents/upload`, {
+      const res = await authFetch(`${API_BASE}/api/knowledge/documents/upload`, {
         method: "POST", body: formData
       });
       if (res.ok) {
@@ -64,7 +65,7 @@ export default function KnowledgeBaseView({ onNavigateToQA }: KnowledgeBaseViewP
   const handleDelete = async (id: number, title: string) => {
     if (!confirm(`确定删除「${title}」？删除后不可恢复。`)) return;
     try {
-      const res = await fetch(`${API_BASE}/api/knowledge/documents/${id}`, { method: "DELETE" });
+      const res = await authFetch(`${API_BASE}/api/knowledge/documents/${id}`, { method: "DELETE" });
       if (res.ok) loadData();
     } catch (err) {
       console.error("删除失败:", err);

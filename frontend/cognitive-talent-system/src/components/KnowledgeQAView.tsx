@@ -4,6 +4,7 @@ import {
   Sparkles, ArrowLeft, FileText, ChevronDown, ChevronUp, ExternalLink
 } from "lucide-react";
 import { KnowledgeDocument } from "../types";
+import { authFetch } from "../api";
 
 const API_BASE = "http://localhost:8082";
 
@@ -42,7 +43,7 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
 
   // 加载文档列表
   useEffect(() => {
-    fetch(`${API_BASE}/api/knowledge/documents`)
+    authFetch(`${API_BASE}/api/knowledge/documents`)
       .then(res => res.json())
       .then((data: KnowledgeDocument[]) => setDocuments(data))
       .catch(() => {});
@@ -116,7 +117,7 @@ export default function KnowledgeQAView({ onNavigateBack }: KnowledgeQAViewProps
       }
       const url = `${API_BASE}/api/knowledge/qa/stream`;
 
-      const response = await fetch(url, {
+      const response = await authFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

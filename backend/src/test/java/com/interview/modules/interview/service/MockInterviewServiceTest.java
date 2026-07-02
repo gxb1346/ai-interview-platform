@@ -1,7 +1,9 @@
 package com.interview.modules.interview.service;
 
+import com.interview.modules.evaluation.engine.UnifiedEvaluationEngine;
 import com.interview.modules.interview.model.InterviewQuestion;
 import com.interview.modules.interview.model.InterviewSession;
+import com.interview.modules.interview.repository.InterviewSessionRecordRepository;
 import com.interview.modules.interview.repository.InterviewSessionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,13 +35,20 @@ class MockInterviewServiceTest {
     private DirectionRecommendService directionRecommendService;
     @Mock
     private InterviewSessionRepository sessionRepository;
+    @Mock
+    private InterviewSessionRecordRepository interviewRecordRepository;
+    @Mock
+    private RealTimeScoreService realTimeScoreService;
+    @Mock
+    private UnifiedEvaluationEngine evaluationEngine;
 
     private MockInterviewService service;
 
     @BeforeEach
     void setUp() {
         service = new MockInterviewService(questionGenerator, followUpService,
-                jdParseService, directionRecommendService, sessionRepository);
+                jdParseService, directionRecommendService, sessionRepository,
+                interviewRecordRepository, realTimeScoreService, evaluationEngine);
     }
 
     private InterviewSession createFreshSession() {
@@ -91,8 +100,8 @@ class MockInterviewServiceTest {
 
         assertEquals("IN_PROGRESS", started.getStatus());
         assertEquals("selfIntro", started.getCurrentStage());
-        // addMessage increments currentRound, so after welcome message it's 1
-        assertEquals(1, started.getCurrentRound());
+        // addMessage 只对候选人回答增加轮次，面试官欢迎消息不增加轮次
+        assertEquals(0, started.getCurrentRound());
         assertFalse(started.getQuestions().isEmpty());
         assertEquals(1, started.getMessages().size());
         assertEquals("interviewer", started.getMessages().get(0).getSender());

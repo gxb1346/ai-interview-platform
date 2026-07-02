@@ -1,40 +1,41 @@
 package com.interview.modules.interview.skill;
 
+import lombok.Builder;
+import lombok.Data;
+
 import java.util.List;
-import java.util.Map;
 
 /**
- * SKILL.md 文件解析后的定义模型
+ * Skill 定义数据类
+ * 封装从 SKILL.md 和 skill.meta.yml 加载的所有数据
  */
+@Data
+@Builder
 public class SkillDefinition {
-
+    /** 中文方向名称 */
     private String directionName;
+    /** 目录名 */
+    private String dirName;
+    /** 英文名称 */
+    private String name;
+    /** 描述 */
     private String description;
-    private String version;
+    /** 显示名称 */
+    private String displayName;
+    /** 图标 */
+    private String icon;
+    /** 渐变样式 */
+    private String gradient;
+    /** 图标背景样式 */
+    private String iconBg;
+    /** 图标颜色样式 */
+    private String iconColor;
+    /** SKILL.md 正文（系统提示词） */
+    private String systemPrompt;
+    /** 考察范围 */
     private List<String> scopeAreas;
-    private Map<String, Double> difficultyDistribution;
-    private List<String> knowledgeBase;
-    private String promptTemplate;
-
-    // Getters and Setters
-    public String getDirectionName() { return directionName; }
-    public void setDirectionName(String directionName) { this.directionName = directionName; }
-
-    public String getDescription() { return description; }
-    public void setDescription(String description) { this.description = description; }
-
-    public String getVersion() { return version; }
-    public void setVersion(String version) { this.version = version; }
-
-    public List<String> getScopeAreas() { return scopeAreas; }
-    public void setScopeAreas(List<String> scopeAreas) { this.scopeAreas = scopeAreas; }
-
-    public Map<String, Double> getDifficultyDistribution() { return difficultyDistribution; }
-    public void setDifficultyDistribution(Map<String, Double> difficultyDistribution) { this.difficultyDistribution = difficultyDistribution; }
-
-    public List<String> getKnowledgeBase() { return knowledgeBase; }
-    public void setKnowledgeBase(List<String> knowledgeBase) { this.knowledgeBase = knowledgeBase; }
-
-    public String getPromptTemplate() { return promptTemplate; }
-    public void setPromptTemplate(String promptTemplate) { this.promptTemplate = promptTemplate; }
+    /** 知识库内容 */
+    private String knowledgeBase;
+    /** 版本号 */
+    private String version;
 }

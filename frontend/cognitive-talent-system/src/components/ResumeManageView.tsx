@@ -9,6 +9,7 @@ import {
   RotateCcw, UserPlus, UserCheck
 } from "lucide-react";
 import { ResumeVO, PageResult, ApiResult } from "../types";
+import { authFetch } from "../api";
 import ResumeDetailEditModal from "./ResumeDetailEditModal";
 
 const API_BASE = "http://localhost:8082";
@@ -61,7 +62,7 @@ export default function ResumeManageView() {
       if (minScore !== undefined) params.set("minScore", String(minScore));
       if (maxScore !== undefined) params.set("maxScore", String(maxScore));
 
-      const res = await fetch(`${API_BASE}/api/resume/page?${params}`);
+      const res = await authFetch(`${API_BASE}/api/resume/page?${params}`);
       const json: ApiResult<PageResult<ResumeVO>> = await res.json();
       if (json.code === 200) {
         setData(json.data);
@@ -97,7 +98,7 @@ export default function ResumeManageView() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/resume/${deleteTarget.id}/soft`, { method: "DELETE" });
+      const res = await authFetch(`${API_BASE}/api/resume/${deleteTarget.id}/soft`, { method: "DELETE" });
       const json: ApiResult<null> = await res.json();
       if (json.code === 200) {
         setDeleteTarget(null);
@@ -138,7 +139,7 @@ export default function ResumeManageView() {
     if (selectedIds.size === 0) return;
     setBatchDeleting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/resume/batch-delete`, {
+      const res = await authFetch(`${API_BASE}/api/resume/batch-delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(Array.from(selectedIds)),
@@ -168,7 +169,7 @@ export default function ResumeManageView() {
   const handleMoveToTalentPool = async (id: number) => {
     setTalentPoolTarget(id);
     try {
-      const res = await fetch(`${API_BASE}/api/resume/${id}/to-talent-pool`, { method: "POST" });
+      const res = await authFetch(`${API_BASE}/api/resume/${id}/to-talent-pool`, { method: "POST" });
       const json: ApiResult<ResumeVO> = await res.json();
       if (json.code === 200) {
         fetchData();

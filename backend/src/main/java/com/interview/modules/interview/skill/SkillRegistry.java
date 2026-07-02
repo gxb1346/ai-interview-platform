@@ -1,5 +1,6 @@
 package com.interview.modules.interview.skill;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 基于 Progressive Disclosure 机制实现按需加载
  */
 @Service
+@Slf4j
 public class SkillRegistry {
 
     private final Map<String, InterviewSkill> skillCache = new ConcurrentHashMap<>();
@@ -64,13 +66,49 @@ public class SkillRegistry {
     }
 
     /**
+     * 获取 Skill 的显示元数据（图标、颜色等）
+     * 用于前端渲染 Skill 选择器
+     */
+    public Map<String, Object> getSkillDisplayMeta(String directionName) {
+        InterviewSkill skill = getSkill(directionName);
+        if (skill instanceof FileBasedInterviewSkill fileSkill) {
+            SkillDefinition def = fileSkill.getDefinition();
+            return Map.of(
+                    "directionName", def.getDirectionName(),
+                    "displayName", def.getDisplayName() != null ? def.getDisplayName() : def.getDirectionName(),
+                    "icon", def.getIcon() != null ? def.getIcon() : "📋",
+                    "gradient", def.getGradient() != null ? def.getGradient() : "from-blue-500 to-indigo-500",
+                    "iconBg", def.getIconBg() != null ? def.getIconBg() : "bg-blue-100",
+                    "iconColor", def.getIconColor() != null ? def.getIconColor() : "text-blue-600",
+                    "description", skill.getDescription(),
+                    "version", skill.getVersion(),
+                    "scopeCount", skill.getScopeAreas().size()
+            );
+        }
+        return Map.of(
+                "directionName", directionName,
+                "displayName", directionName,
+                "icon", "📋",
+                "description", skill.getDescription(),
+                "version", skill.getVersion()
+        );
+    }
+
+    /**
      * 加载 Skill 实现
-     * 优先尝试从 resources/skills/ 加载 SKILL.md 文件
-     * 如果文件不存在，回退到内置的默认实现
+     * 优先从 resources/skills/{dirName}/SKILL.md 和 skill.meta.yml 加载
+     * 如果文件不存在，回退到内置的 DefaultInterviewSkill
      */
     private InterviewSkill loadSkill(String directionName) {
-        // 这里先使用内置默认实现
-        // TODO: 后续从 resources/skills/{directionName}.md 加载 SkillDefinition 并包装为 InterviewSkill
+        // 1. 尝试从文件加载
+        SkillDefinition definition = SkillFileLoader.load(directionName);
+        if (definition != null) {
+            log.info("从文件加载 Skill: {} (目录: {})", directionName, definition.getDirName());
+            return new FileBasedInterviewSkill(definition, skillChatClient);
+        }
+
+        // 2. 回退到内置默认实现
+        log.info("文件未找到，使用内置默认 Skill: {}", directionName);
         return new DefaultInterviewSkill(directionName, skillChatClient);
     }
 

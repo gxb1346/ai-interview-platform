@@ -8,6 +8,7 @@ import {
   CreateSessionResponse, StartInterviewResponse, ChatResponse, DirectionRecommendation,
   JDParseResult, EvaluationReport, STAGE_LABELS, InterviewSession
 } from "../types";
+import { authFetch } from "../api";
 
 interface MockInterviewViewProps {
   candidates: Candidate[];
@@ -270,7 +271,7 @@ export default function MockInterviewView({
     if (!candId) return;
     setLoadingSessions(true);
     try {
-      const res = await fetch(`${API_BASE}/api/mock-interview/candidates/${candId}/active-sessions`);
+      const res = await authFetch(`${API_BASE}/api/mock-interview/candidates/${candId}/active-sessions`);
       const sessions: InterviewSession[] = await res.json();
       setActiveSessions(Array.isArray(sessions) ? sessions : []);
     } catch {
@@ -291,7 +292,7 @@ export default function MockInterviewView({
   const handleResumeSession = async (sid: string) => {
     setResuming(true);
     try {
-      const res = await fetch(`${API_BASE}/api/mock-interview/sessions/${sid}/resume`, { method: "POST" });
+      const res = await authFetch(`${API_BASE}/api/mock-interview/sessions/${sid}/resume`, { method: "POST" });
       if (!res.ok) throw new Error("续面失败");
       const data = await res.json();
 
@@ -332,7 +333,7 @@ export default function MockInterviewView({
 
   // 组件挂载时拉取候选人
   useEffect(() => {
-    fetch(`${API_BASE}/api/resume/talent-pool`)
+    authFetch(`${API_BASE}/api/resume/talent-pool`)
       .then(res => res.json())
       .then((json: ApiResult<ResumeVO[]>) => {
         if (json.code === 200 && json.data) {
@@ -396,7 +397,7 @@ export default function MockInterviewView({
     if (!cand?.aiSummary) return;
     setRecommending(true);
     try {
-      const res = await fetch(`${API_BASE}/api/mock-interview/directions/recommend`, {
+      const res = await authFetch(`${API_BASE}/api/mock-interview/directions/recommend`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ resumeText: cand.aiSummary })
       });
@@ -410,7 +411,7 @@ export default function MockInterviewView({
     if (!customJDText.trim()) return;
     setJdParsing(true);
     try {
-      const res = await fetch(`${API_BASE}/api/mock-interview/jd/parse`, {
+      const res = await authFetch(`${API_BASE}/api/mock-interview/jd/parse`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jdText: customJDText })
       });
@@ -439,7 +440,7 @@ export default function MockInterviewView({
         followUpCount,
         customJD: interviewDirection === "自定义JD" ? customJDText : undefined
       };
-      const createRes = await fetch(`${API_BASE}/api/mock-interview/sessions`, {
+      const createRes = await authFetch(`${API_BASE}/api/mock-interview/sessions`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
       });
       if (!createRes.ok) {
@@ -453,7 +454,7 @@ export default function MockInterviewView({
       setSessionId(newSessionId);
       if (onSessionCreated) onSessionCreated(newSessionId);
 
-      const startRes = await fetch(`${API_BASE}/api/mock-interview/sessions/${newSessionId}/start`, { method: "POST" });
+      const startRes = await authFetch(`${API_BASE}/api/mock-interview/sessions/${newSessionId}/start`, { method: "POST" });
       if (!startRes.ok) {
         const errBody = await startRes.text();
         console.error("开始面试失败:", startRes.status, errBody);
@@ -526,7 +527,7 @@ export default function MockInterviewView({
     setInputText("");
     setThinking(true);
     try {
-      const res = await fetch(`${API_BASE}/api/mock-interview/sessions/${sessionId}/chat`, {
+      const res = await authFetch(`${API_BASE}/api/mock-interview/sessions/${sessionId}/chat`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answer: inputText })
       });
@@ -597,7 +598,7 @@ export default function MockInterviewView({
   const handleEvaluate = async (sid: string) => {
     setEvaluating(true);
     try {
-      const res = await fetch(`${API_BASE}/api/evaluation/sessions/${sid}`, { method: "POST" });
+      const res = await authFetch(`${API_BASE}/api/evaluation/sessions/${sid}`, { method: "POST" });
       const report: EvaluationReport = await res.json();
       setEvaluationReport(report);
       const card: ScoreCard = {
@@ -645,7 +646,7 @@ export default function MockInterviewView({
     if (!sessionId || pauseResumeLoading.current) return;
     pauseResumeLoading.current = true;
     try {
-      await fetch(`${API_BASE}/api/mock-interview/sessions/${sessionId}/pause`, { method: "POST" });
+      await authFetch(`${API_BASE}/api/mock-interview/sessions/${sessionId}/pause`, { method: "POST" });
       if (timerInterval) {
         clearInterval(timerInterval);
         setTimerInterval(null);
@@ -663,7 +664,7 @@ export default function MockInterviewView({
     if (!sessionId || pauseResumeLoading.current) return;
     pauseResumeLoading.current = true;
     try {
-      await fetch(`${API_BASE}/api/mock-interview/sessions/${sessionId}/unpause`, { method: "POST" });
+      await authFetch(`${API_BASE}/api/mock-interview/sessions/${sessionId}/unpause`, { method: "POST" });
       setIsPaused(false);
       // 重新启动计时器
       const interval = setInterval(() => setTimeElapsed(p => p + 1), 1000);
@@ -684,7 +685,7 @@ export default function MockInterviewView({
     setThinking(true);
     stopTimeoutTimer();
     try {
-      const res = await fetch(`${API_BASE}/api/mock-interview/sessions/${sessionId}/chat`, {
+      const res = await authFetch(`${API_BASE}/api/mock-interview/sessions/${sessionId}/chat`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answer: "（回答超时）" })
       });
